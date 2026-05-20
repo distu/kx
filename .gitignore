@@ -19,3 +19,5 @@ secrets/
 *.log
 .vscode/
 .idea/
+
+.abi-marker
