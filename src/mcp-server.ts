@@ -7,6 +7,7 @@ import {
 import type { KxConfig } from './config.js';
 import { search, getStatus } from './searcher.js';
 import { indexProject, indexSinglePath } from './indexer.js';
+import { addActivity, updateActivity, statusReport, getActivity } from './megabrain.js';
 
 export async function startMcpServer(config: KxConfig): Promise<void> {
   const server = new Server(
@@ -68,6 +69,57 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
           properties: {},
         },
       },
+      {
+        name: 'megabrain_add',
+        description: 'KX activity manager: cria uma atividade NOVA em .vault/megabrain/ (mesmo formato do skill /organization-megabrain) e sincroniza o MOC-Atividades.md. Use quando o usuário pedir para registrar/adicionar/catalogar uma atividade ou task nova. Escopo do projeto atual (isolado por .kx.json; nunca cruza projeto).',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            titulo: { type: 'string', description: 'Título da atividade' },
+            squad: { type: 'string', enum: ['portal-backoffice', 'infraestrutura', 'integracoes', 'pdv-core', 'transversal'] },
+            modulo: { type: 'string', description: 'Módulo/serviço principal' },
+            descricao: { type: 'string' },
+            branches: { type: 'string', description: 'ex: repo1:branch1, repo2:branch2' },
+            data_inicio: { type: 'string', description: 'YYYY-MM-DD (padrão: hoje)' },
+            data_entrega: { type: 'string' },
+            sessao: { type: 'string', description: 'ID da sessão Claude Code atual' },
+            doc: { type: 'string', description: 'Link da doc da feature' },
+            status: { type: 'string', enum: ['em-andamento', 'pendente'], default: 'em-andamento' },
+          },
+          required: ['titulo'],
+        },
+      },
+      {
+        name: 'megabrain_update',
+        description: 'KX activity manager: atualiza uma atividade existente — avanço (entra no Log de Progresso), bloqueio (Erros e Bloqueios + status=bloqueado), ou conclusão (status=concluida + move no MOC). Use quando o usuário relatar avanço/erro/conclusão de uma atividade. Escopo do projeto atual.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            slug: { type: 'string', description: 'Slug da atividade (nome do arquivo sem .md)' },
+            tipo: { type: 'string', enum: ['avanco', 'bloqueio', 'conclusao'] },
+            texto: { type: 'string', description: 'O que foi feito/travou/concluído' },
+            sessao: { type: 'string', description: 'ID da sessão Claude Code atual' },
+          },
+          required: ['slug', 'tipo'],
+        },
+      },
+      {
+        name: 'megabrain_status',
+        description: 'KX activity manager: painel de status das atividades do projeto — últimas N (padrão 20), status de cada uma e "onde paramos" (última entrada do log). Use quando o usuário pedir status / o que estamos fazendo / pendências / histórico das atividades. Escopo do projeto atual.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: { limit: { type: 'number', description: 'Quantas atividades (padrão 20)', default: 20 } },
+        },
+      },
+      {
+        name: 'megabrain_get',
+        description: 'KX activity manager: retorna o conteúdo completo (.md) de uma atividade pelo slug. Escopo do projeto atual.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: { slug: { type: 'string' } },
+          required: ['slug'],
+        },
+      },
     ],
   }));
 
@@ -127,6 +179,28 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
             text: `Índice: ${config.project}\n- Documentos únicos: ${stats.totalDocuments}\n- Total de chunks: ${stats.totalChunks}\n- Por tipo:\n${byTypeStr}`,
           }],
         };
+      }
+
+      case 'megabrain_add': {
+        const r = addActivity(config, args as any);
+        try { await indexSinglePath(config, r.path); } catch { /* indexacao best-effort */ }
+        return { content: [{ type: 'text', text: `Atividade criada: ${r.slug}\n${r.path}` }] };
+      }
+
+      case 'megabrain_update': {
+        const r = updateActivity(config, args as any);
+        try { await indexSinglePath(config, r.path); } catch { /* indexacao best-effort */ }
+        return { content: [{ type: 'text', text: `Atividade "${(args as { slug: string }).slug}" atualizada (${(args as { tipo: string }).tipo}). status=${r.status}` }] };
+      }
+
+      case 'megabrain_status': {
+        const text = statusReport(config, (args as { limit?: number }).limit || 20);
+        return { content: [{ type: 'text', text }] };
+      }
+
+      case 'megabrain_get': {
+        const text = getActivity(config, (args as { slug: string }).slug);
+        return { content: [{ type: 'text', text }] };
       }
 
       default:
