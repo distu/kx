@@ -20,13 +20,19 @@ const SQUADS = ['portal-backoffice', 'infraestrutura', 'integracoes', 'pdv-core'
 function vaultRoot(config: KxConfig): string {
   const root = resolve(config.projectRoot);
   if (root === resolve(homedir())) {
-    throw new Error('KX activity manager indisponivel: config global (~). Rode dentro de um projeto com .kx.json + .vault/.');
+    throw new Error('KX activity manager indisponivel: config global (~). Rode dentro de um projeto com .kx.json.');
   }
-  const vault = resolve(root, '.vault');
-  if (!existsSync(vault)) {
-    throw new Error(`KX activity manager indisponivel: .vault/ nao existe em ${root} (projeto ${config.project}).`);
+  // Isolamento: so opera em projeto kx real (tem .kx.json no projectRoot). O .vault/ pode
+  // ainda nao existir — e criado sob demanda no add (bootstrap automatico por projeto).
+  if (!existsSync(resolve(root, '.kx.json'))) {
+    throw new Error(`KX activity manager indisponivel: ${root} nao e um projeto kx (.kx.json ausente).`);
   }
-  return vault;
+  return resolve(root, '.vault');
+}
+function ensureVaultDir(config: KxConfig, sub: string): string {
+  const d = assertInside(vaultRoot(config), resolve(vaultRoot(config), sub));
+  if (!existsSync(d)) mkdirSync(d, { recursive: true });
+  return d;
 }
 function assertInside(base: string, p: string): string {
   const b = resolve(base); const r = resolve(p);
@@ -34,12 +40,23 @@ function assertInside(base: string, p: string): string {
   return r;
 }
 function mbDir(config: KxConfig): string {
-  const d = assertInside(vaultRoot(config), resolve(vaultRoot(config), 'megabrain'));
-  if (!existsSync(d)) mkdirSync(d, { recursive: true });
-  return d;
+  // NAO cria (leitura). Para escrita, usar ensureVaultDir(config, 'megabrain').
+  return assertInside(vaultRoot(config), resolve(vaultRoot(config), 'megabrain'));
 }
 function mocFile(config: KxConfig): string {
   return assertInside(vaultRoot(config), resolve(vaultRoot(config), '_index', 'MOC-Atividades.md'));
+}
+// Bootstrap: cria o MOC-Atividades.md com as secoes canonicas se ainda nao existir.
+function ensureMoc(config: KxConfig): string {
+  const f = mocFile(config);
+  if (!existsSync(f)) {
+    ensureVaultDir(config, '_index');
+    writeFileSync(f, `---\ntype: moc\ntopic: atividades\nupdated: ${todayISO()}\n---\n\n` +
+      `# Atividades - Map of Content (KX activity manager)\n\n` +
+      `> Fonte de verdade sobre o que esta em andamento, pendente e concluido.\n\n` +
+      `## Em Andamento\n\n## Pendente / Não Iniciado\n\n## Concluídas Recentemente\n\n## Por Squad\n\n`, 'utf-8');
+  }
+  return f;
 }
 
 // ---- helpers ----
@@ -70,7 +87,7 @@ function statusLabel(st: string): string {
 // ---- ADD ----
 export function addActivity(config: KxConfig, a: AddArgs): { path: string; slug: string } {
   if (!a.titulo || !a.titulo.trim()) throw new Error('titulo obrigatorio');
-  const dir = mbDir(config);
+  const dir = ensureVaultDir(config, 'megabrain');
   const slug = slugify(a.titulo);
   const file = assertInside(vaultRoot(config), resolve(dir, `${slug}.md`));
   if (existsSync(file)) throw new Error(`atividade ja existe: ${slug} (use megabrain_update).`);
@@ -201,8 +218,7 @@ function setStatusBox(md: string, on: 'Em andamento' | 'Bloqueado' | 'Concluido'
 
 // ---- MOC sync (cirurgico) ----
 function mocSync(config: KxConfig, slug: string, titulo: string, squad: string, alvo: 'andamento' | 'pendente' | 'concluida'): void {
-  const f = mocFile(config);
-  if (!existsSync(f)) return; // sem MOC, nao falha
+  const f = ensureMoc(config); // cria o MOC scaffold se nao existir (bootstrap por projeto)
   let moc = readFileSync(f, 'utf-8');
   const line = `- [[${slug}]] — ${titulo} (squad ${squad}${alvo === 'concluida' ? ', ' + todayISO() : ''})`;
   // remove linha antiga do slug em qualquer secao gerenciada
@@ -234,6 +250,7 @@ interface ActRow { slug: string; titulo: string; status: string; squad: string; 
 function readAll(config: KxConfig): ActRow[] {
   const dir = mbDir(config);
   const rows: ActRow[] = [];
+  if (!existsSync(dir)) return rows; // projeto sem atividades ainda (bootstrap so no add)
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.md')) continue;
     const md = readFileSync(resolve(dir, f), 'utf-8');
