@@ -1,18 +1,17 @@
 {
   "name": "kx",
   "version": "1.0.0",
-  "description": "MCP server + CLI para busca semântica no projeto Projeto A",
+  "description": "MCP server + CLI para busca semântica local em projetos",
   "type": "module",
   "bin": {
     "kx": "./bin/kx.js"
   },
   "scripts": {
     "build": "tsc",
-    "start": "node --loader ts-node/esm src/index.ts",
+    "start": "tsx src/index.ts",
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
     "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "better-sqlite3": "^11.8.1",

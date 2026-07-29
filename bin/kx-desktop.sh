@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# Wrapper para Claude Desktop — faz chdir antes de iniciar MCP server kx.
-# Shell CLI nao usa este wrapper (continua chamando kx.js direto).
-cd "${KX_DESKTOP_CWD:-/absolute/path/to/home/projects/project-b/workspace/project-b}" || exit 1
-exec /opt/homebrew/bin/node /absolute/path/to/home/.kx/bin/kx.js mcp "$@"
+# Wrapper para Claude Desktop — faz chdir antes de iniciar o MCP server kx.
+# Defina KX_DESKTOP_CWD para o workspace desejado; sem isso, usa o diretório atual.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KX_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+NODE_BIN="${KX_NODE_BIN:-$(command -v node)}"
+
+cd "${KX_DESKTOP_CWD:-$PWD}"
+exec "$NODE_BIN" "$KX_DIR/bin/kx.js" mcp "$@"

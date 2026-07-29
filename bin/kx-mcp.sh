@@ -36,9 +36,13 @@ elif [ "$(cat "$MARKER" 2>/dev/null)" != "$CURRENT_KEY" ]; then
   log "node mudou: $(cat "$MARKER") -> $CURRENT_KEY"
 fi
 
+# Health-check REAL: o addon nativo do better-sqlite3 so carrega no construtor
+# (new Database), nao no require. Um "require" sozinho da falso-positivo e mascara
+# ABI mismatch. Instanciar um DB em memoria forca a carga do .node e expoe o erro.
+HEALTHCHECK="new (require('$KX_DIR/node_modules/better-sqlite3'))(':memory:').close()"
 if [ "$needs_rebuild" = 0 ]; then
-  if ! "$NODE_BIN" -e "require('$KX_DIR/node_modules/better-sqlite3')" 2>/dev/null; then
-    log "marker bate mas require falhou, forcando rebuild"
+  if ! "$NODE_BIN" -e "$HEALTHCHECK" 2>/dev/null; then
+    log "marker bate mas carga do binario nativo falhou, forcando rebuild"
     needs_rebuild=1
   fi
 fi
@@ -46,7 +50,7 @@ fi
 if [ "$needs_rebuild" = 1 ]; then
   log "rodando npm rebuild better-sqlite3 ($CURRENT_KEY)"
   if (cd "$KX_DIR" && npm rebuild better-sqlite3 >>"$LOG_FILE" 2>&1); then
-    if "$NODE_BIN" -e "require('$KX_DIR/node_modules/better-sqlite3')" 2>>"$LOG_FILE"; then
+    if "$NODE_BIN" -e "$HEALTHCHECK" 2>>"$LOG_FILE"; then
       echo "$CURRENT_KEY" > "$MARKER"
       log "rebuild ok, marker atualizado"
     else

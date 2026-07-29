@@ -68,6 +68,10 @@ export class VectorDatabase {
     `);
   }
 
+  clearAll(): void {
+    this.db.exec('DELETE FROM vec_documents; DELETE FROM documents;');
+  }
+
   insertDocument(
     path: string,
     chunkIndex: number,
@@ -77,8 +81,16 @@ export class VectorDatabase {
     embedding: Float32Array,
     metadata: Record<string, unknown> = {}
   ): number {
+    const existing = this.db.prepare(
+      'SELECT id FROM documents WHERE path = ? AND chunk_index = ?'
+    ).get(path, chunkIndex) as { id: number } | undefined;
+    if (existing) {
+      this.db.prepare('DELETE FROM vec_documents WHERE document_id = ?').run(BigInt(existing.id));
+      this.db.prepare('DELETE FROM documents WHERE id = ?').run(existing.id);
+    }
+
     const insertDoc = this.db.prepare(`
-      INSERT OR REPLACE INTO documents (path, chunk_index, content, source_type, modified_at, metadata)
+      INSERT INTO documents (path, chunk_index, content, source_type, modified_at, metadata)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
 

@@ -27,7 +27,7 @@
       "type": "vault",
       "path": "./.vault",
       "glob": "**/*.md",
-      "exclude": ["**/templates/**", "**/.obsidian/**", "**/.trash/**"]
+      "exclude": ["**/templates/**", "**/.obsidian/**", "**/.trash/**", "**/_secrets/**", "**/secrets/**"]
     },
     {
       "type": "code",
@@ -38,8 +38,8 @@
     {
       "type": "config",
       "path": ".",
-      "glob": "**/{*.yml,*.yaml,*.properties,.env*,docker-compose*,Dockerfile*,package.json,tsconfig.json}",
-      "exclude": ["**/node_modules/**", "**/build/**", "**/.git/**"]
+      "glob": "**/{*.yml,*.yaml,*.properties,docker-compose*,Dockerfile*,package.json,tsconfig.json}",
+      "exclude": ["**/node_modules/**", "**/build/**", "**/.git/**", "**/.env*", "**/_secrets/**", "**/secrets/**"]
     }
   ],
   "embedding": {

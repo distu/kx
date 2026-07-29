@@ -1,6 +1,6 @@
 import { watch } from 'chokidar';
 import type { KxConfig } from './config.js';
-import { indexSinglePath } from './indexer.js';
+import { indexSinglePath, removeSinglePath } from './indexer.js';
 
 export function startWatcher(config: KxConfig): void {
   // Observar apenas arquivos relevantes via globs específicos
@@ -56,7 +56,8 @@ export function startWatcher(config: KxConfig): void {
 
   watcher.on('unlink', (filePath) => {
     console.error(`Arquivo removido: ${filePath}`);
-    // TODO: remover do índice
+    try { removeSinglePath(config, filePath); }
+    catch (error) { console.error(`  Erro ao remover do índice: ${(error as Error).message}`); }
   });
 
   console.error('File watcher ativo. Ctrl+C para parar.');

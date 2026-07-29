@@ -97,7 +97,7 @@ Projeto C:  .kx.json → ~/.kx/data/projeto-c.sqlite
 | **Documentação** (docs) | `*.md` | Headers como limite, ~512 tokens, 10% overlap |
 | **Vault pessoal** (vault) | `*.md` no `.vault/` | Idem, wikilinks removidos na indexação |
 | **Código** (code) | `*.java`, `*.ts`, `*.tsx`, `*.sql` | Por função/método/classe, ~1024 tokens |
-| **Configuração** (config) | `*.yml`, `*.properties`, `*.json`, `*.xml`, `*.gradle`, `Dockerfile*`, `.env*` | Arquivo inteiro ou por seção, ~256 tokens |
+| **Configuração** (config) | `*.yml`, `*.properties`, `*.json`, `*.xml`, `*.gradle`, `Dockerfile*` | Arquivo inteiro ou por seção, ~256 tokens; arquivos `.env*` devem ser excluídos |
 
 Exclusões automáticas: `node_modules/`, `.git/`, `build/`, `target/`, `dist/`, `.obsidian/`
 
@@ -254,15 +254,14 @@ O design do kx foi baseado em pesquisa extensiva (80+ fontes, março 2026):
 
 ---
 
-## Projetos Ativos
+## Exemplo de organização local
 
 | Projeto | Diretório | Database | Chunks |
 |---|---|---|---|
-| Projeto A (Fase 2) | `~/projects/organization/organization-a/git/fase2/` | `project-a.sqlite` | 40.154 |
-| Projeto B | `~/projects/project-b/` | `project-b.sqlite` | (pendente) |
-| Projeto C | `~/projects/organization-b/` | `project-c.sqlite` | (pendente) |
+| Projeto A | `~/projects/project-a/` | `project-a.sqlite` | exemplo |
+| Projeto B | `~/projects/project-b/` | `project-b.sqlite` | exemplo |
+| Projeto C | `~/projects/project-c/` | `project-c.sqlite` | exemplo |
 
 ---
 
 *Versão 1.0.0 — 2026-03-28*
-*Autor: A pessoa desenvolvedora*

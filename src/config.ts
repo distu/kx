@@ -7,11 +7,19 @@ export interface SourceConfig {
   path: string;
   glob: string;
   exclude?: string[];
+  /**
+   * Peso opcional de prioridade na busca (padrao implicito: 1, sem efeito).
+   * Só é considerado quando > 1 e explicitamente configurado — projetos que
+   * não definem `weight` em nenhuma fonte têm busca 100% inalterada.
+   */
+  weight?: number;
 }
 
 export interface KxConfig {
   project: string;
   index: string;
+  /** Diretório base do .kx.json resolvido (derivado em loadConfig, não vem do JSON do usuário). */
+  projectRoot: string;
   sources: SourceConfig[];
   embedding: {
     model: string;
@@ -27,6 +35,7 @@ export interface KxConfig {
 const DEFAULT_CONFIG: KxConfig = {
   project: 'default',
   index: '~/.kx/data/default.sqlite',
+  projectRoot: process.cwd(),
   sources: [],
   embedding: {
     model: 'Xenova/all-MiniLM-L6-v2',
@@ -90,6 +99,7 @@ export function loadConfig(basePath?: string): KxConfig {
   };
 
   // Resolver paths relativos
+  config.projectRoot = base;
   config.index = resolve(base, config.index);
   config.sources = config.sources.map(s => ({
     ...s,

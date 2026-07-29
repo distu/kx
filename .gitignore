@@ -8,6 +8,15 @@ data/
 *.sqlite-wal
 *.sqlite-shm
 
+# Configuração e dados locais por máquina/projeto.
+.vault/
+.kx.json
+.mcp.json
+cockpit/projects.json
+cockpit-app/.build/
+.swiftpm/
+ANALISE-RAG-kx.md
+
 .env
 .env.*
 !.env.placeholder

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KX Cockpit - Prototipo Visual</title>
+<style>
+  :root{
+    --surface-opacity:0.60;           /* controlado pelo slider de transparencia */
+    --accent:#6366f1;
+    --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --idle:#94a3b8; --run:#38bdf8;
+    --txt:#f1f5f9; --txt-dim:#94a3b8; --line:rgba(255,255,255,.10);
+    --radius:14px; --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--font); color:var(--txt);
+    /* "wallpaper" atras para demonstrar a vibrancy/transparencia */
+    background:
+      radial-gradient(1200px 800px at 15% 10%, #3b0764 0%, transparent 55%),
+      radial-gradient(1000px 700px at 85% 20%, #0c4a6e 0%, transparent 50%),
+      radial-gradient(900px 900px at 70% 90%, #064e3b 0%, transparent 55%),
+      linear-gradient(135deg,#0b1120,#1e1b4b 60%,#0b1120);
+    background-attachment:fixed;
+    min-height:100vh; overflow-x:hidden;
+  }
+  /* barra de menu do macOS simulada */
+  .macbar{
+    position:fixed; top:0; left:0; right:0; height:26px; z-index:50;
+    background:rgba(10,12,20,.35); backdrop-filter:saturate(180%) blur(20px);
+    display:flex; align-items:center; justify-content:flex-end; gap:16px;
+    padding:0 14px; font-size:12px; color:#e2e8f0; border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .macbar .brand{margin-right:auto; font-weight:600; opacity:.8}
+  .macbar .mb-item{opacity:.85; cursor:default}
+  .macbar .mb-cockpit{
+    display:flex; align-items:center; gap:6px; cursor:pointer; padding:2px 8px;
+    border-radius:7px; background:rgba(99,102,241,.25); border:1px solid rgba(99,102,241,.4);
+  }
+  .macbar .badge{background:var(--accent); color:#fff; border-radius:999px; font-size:10px; padding:1px 6px; font-weight:700}
+  .macbar .badge.warn{background:var(--warn); color:#1a1200}
+
+  .hint{position:fixed; top:40px; left:50%; transform:translateX(-50%); z-index:40;
+    font-size:12px; color:var(--txt-dim); background:rgba(0,0,0,.35); padding:6px 12px; border-radius:999px;
+    border:1px solid var(--line)}
+
+  /* painel do cockpit ancorado sob o icone */
+  .panel{
+    position:fixed; top:52px; right:14px; width:404px; max-height:600px; z-index:45;
+    display:flex; flex-direction:column; border-radius:var(--radius); overflow:hidden;
+    border:1px solid rgba(255,255,255,.14);
+    box-shadow:0 24px 60px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4);
+    background:rgba(17,20,32,var(--surface-opacity));
+    backdrop-filter:saturate(180%) blur(30px);
+    -webkit-backdrop-filter:saturate(180%) blur(30px);
+  }
+  .statusbar{display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--line)}
+  .statusbar .logo{width:22px;height:22px;border-radius:7px;
+    background:conic-gradient(from 200deg,var(--accent),#22d3ee,#22c55e,var(--accent)); box-shadow:0 0 12px rgba(99,102,241,.6)}
+  .statusbar .title{font-weight:700; font-size:13px; letter-spacing:.2px}
+  .statusbar .spacer{margin-left:auto}
+  .pill{font-size:11px; padding:3px 8px; border-radius:999px; border:1px solid var(--line); color:var(--txt-dim); display:inline-flex; gap:5px; align-items:center}
+  .dot{width:7px;height:7px;border-radius:50%}
+  .icobtn{width:26px;height:26px;border-radius:8px;border:1px solid var(--line); background:rgba(255,255,255,.04);
+    color:var(--txt); cursor:pointer; font-size:13px; display:grid; place-items:center}
+  .icobtn:hover{background:rgba(255,255,255,.10)}
+
+  /* abas por projeto */
+  .tabs{display:flex; gap:6px; padding:10px 12px 4px; overflow-x:auto; border-bottom:1px solid var(--line)}
+  .tab{white-space:nowrap; font-size:12px; padding:5px 11px; border-radius:999px; cursor:pointer;
+    border:1px solid var(--line); color:var(--txt-dim); background:rgba(255,255,255,.03); display:flex; gap:7px; align-items:center}
+  .tab .cnt{font-size:10px; background:rgba(255,255,255,.12); border-radius:999px; padding:0 6px}
+  .tab.active{color:#fff; border-color:transparent}
+  .tab .swatch{width:8px;height:8px;border-radius:50%}
+  .tab.add{color:var(--txt-dim)}
+
+  /* busca + filtro */
+  .controls{display:flex; flex-direction:column; gap:8px; padding:10px 12px; border-bottom:1px solid var(--line)}
+  .searchrow{display:flex; gap:8px; align-items:center}
+  .search{flex:1; display:flex; align-items:center; gap:8px; background:rgba(0,0,0,.25);
+    border:1px solid var(--line); border-radius:9px; padding:7px 10px}
+  .search input{background:transparent; border:0; outline:0; color:var(--txt); font-size:13px; width:100%}
+  select{background:rgba(0,0,0,.25); color:var(--txt); border:1px solid var(--line); border-radius:9px; padding:6px 8px; font-size:12px}
+  .sortrow{display:flex; gap:6px; align-items:center; font-size:11px; color:var(--txt-dim)}
+  .chipbtn{font-size:11px; padding:3px 9px; border-radius:999px; border:1px solid var(--line); background:transparent; color:var(--txt-dim); cursor:pointer}
+  .chipbtn.on{background:rgba(99,102,241,.25); border-color:rgba(99,102,241,.5); color:#fff}
+  .count{margin-left:auto; font-size:11px; color:var(--txt-dim)}
+
+  /* corpo rolavel */
+  .body{overflow-y:auto; padding:6px; flex:1}
+  .item{display:grid; grid-template-columns:22px 1fr; gap:8px; padding:10px; border-radius:11px; cursor:pointer;
+    border:1px solid transparent}
+  .item:hover{background:rgba(255,255,255,.05); border-color:var(--line)}
+  .item.sel{background:rgba(99,102,241,.14); border-color:rgba(99,102,241,.4)}
+  .key{width:22px;height:22px;border-radius:6px; display:grid; place-items:center; font-size:12px; font-weight:700;
+    background:rgba(255,255,255,.08); border:1px solid var(--line); color:var(--txt-dim); margin-top:2px}
+  .item.sel .key{background:var(--accent); color:#fff; border-color:transparent}
+  .it-title{display:flex; align-items:center; gap:8px}
+  .it-title .st{width:9px;height:9px;border-radius:50%; flex:none}
+  .it-title .name{font-size:13.5px; font-weight:650; line-height:1.2}
+  .it-title .sess{margin-left:auto; font-size:10px; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--txt-dim)}
+  .sess.running{color:#082f49; background:var(--run); border-color:transparent; font-weight:700}
+  .sess.blocked{color:#1a1200; background:var(--warn); border-color:transparent; font-weight:700}
+  .meta{font-size:11px; color:var(--txt-dim); margin-top:3px}
+  .branches{display:flex; gap:5px; flex-wrap:wrap; margin-top:6px}
+  .chip{font-size:10.5px; padding:2px 7px; border-radius:6px; background:rgba(255,255,255,.06); border:1px solid var(--line); color:#cbd5e1}
+  .mrs{display:flex; gap:5px; flex-wrap:wrap; margin-top:6px}
+  .mr{font-size:10.5px; padding:2px 8px; border-radius:999px; display:inline-flex; gap:5px; align-items:center; border:1px solid var(--line)}
+  .mr .d{width:6px;height:6px;border-radius:50%}
+  .mr.approved{background:rgba(34,197,94,.14); border-color:rgba(34,197,94,.4)}
+  .mr.review{background:rgba(245,158,11,.14); border-color:rgba(245,158,11,.4)}
+  .mr.merged{background:rgba(99,102,241,.14); border-color:rgba(99,102,241,.4)}
+  .mr.degraded{opacity:.6}
+  .azure{font-size:10.5px; color:var(--txt-dim); margin-top:5px}
+  .lastlog{font-size:11px; color:#cbd5e1; margin-top:6px; font-style:italic; opacity:.85}
+  .actions{display:none; gap:6px; margin-top:8px}
+  .item:hover .actions,.item.sel .actions{display:flex}
+  .act{font-size:11px; padding:4px 9px; border-radius:7px; border:1px solid var(--line); background:rgba(255,255,255,.05); color:var(--txt); cursor:pointer}
+  .act.primary{background:var(--accent); border-color:transparent; font-weight:650}
+
+  .warnbar{margin:6px; padding:8px 10px; border-radius:9px; font-size:11.5px; display:flex; gap:8px; align-items:center;
+    background:rgba(245,158,11,.14); border:1px solid rgba(245,158,11,.4); color:#fde68a}
+
+  .footer{display:flex; align-items:center; gap:8px; padding:9px 12px; border-top:1px solid var(--line); font-size:11px; color:var(--txt-dim)}
+  .footer .kbd{margin-left:auto; font-size:10px; border:1px solid var(--line); border-radius:6px; padding:2px 6px; background:rgba(255,255,255,.05)}
+  .empty{padding:40px 16px; text-align:center; color:var(--txt-dim); font-size:13px}
+
+  /* command palette */
+  .cmdk{position:fixed; inset:0; z-index:60; display:none; align-items:flex-start; justify-content:center; padding-top:120px;
+    background:rgba(0,0,0,.4); backdrop-filter:blur(4px)}
+  .cmdk.open{display:flex}
+  .cmdbox{width:460px; border-radius:14px; overflow:hidden; border:1px solid rgba(255,255,255,.16);
+    background:rgba(17,20,32,.85); backdrop-filter:blur(30px); box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .cmdbox input{width:100%; background:transparent; border:0; outline:0; color:var(--txt); font-size:15px; padding:16px}
+  .cmdlist{max-height:300px; overflow-y:auto; border-top:1px solid var(--line)}
+  .cmd{padding:11px 16px; font-size:13px; display:flex; gap:10px; align-items:center; cursor:pointer}
+  .cmd:hover,.cmd.sel{background:rgba(99,102,241,.2)}
+  .cmd .c-key{margin-left:auto; font-size:10px; color:var(--txt-dim); border:1px solid var(--line); border-radius:5px; padding:1px 6px}
+
+  /* settings */
+  .settings{position:fixed; inset:0; z-index:60; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.45); backdrop-filter:blur(4px)}
+  .settings.open{display:flex}
+  .setbox{width:460px; max-height:80vh; overflow:auto; border-radius:16px; border:1px solid rgba(255,255,255,.16);
+    background:rgba(17,20,32,.92); backdrop-filter:blur(30px); box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .sethead{display:flex; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); font-weight:700}
+  .sethead .icobtn{margin-left:auto}
+  .setsec{padding:14px 16px; border-bottom:1px solid var(--line)}
+  .setsec h4{font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--txt-dim); margin-bottom:10px}
+  .row{display:flex; align-items:center; gap:10px; margin:9px 0; font-size:13px}
+  .row label{flex:1; color:#e2e8f0}
+  input[type=range]{width:150px; accent-color:var(--accent)}
+  .val{font-size:12px; color:var(--txt-dim); width:42px; text-align:right}
+  .swrow{display:flex; gap:6px}
+</style>
+</head>
+<body>
+
+<!-- barra de menu do macOS -->
+<div class="macbar">
+  <span class="brand"> Finder</span>
+  <span class="mb-item">Wi-Fi</span>
+  <span class="mb-item">100%</span>
+  <span class="mb-cockpit" onclick="togglePanel()">
+    <span style="width:12px;height:12px;border-radius:4px;background:conic-gradient(from 200deg,#6366f1,#22d3ee,#22c55e,#6366f1);display:inline-block"></span>
+    Cockpit <span class="badge">3</span><span class="badge warn">1</span>
+  </span>
+  <span class="mb-item">14:32</span>
+</div>
+
+<div class="hint">Prototipo navegavel - clique no <b>Cockpit</b> na barra. Atalhos: <b>/</b> busca &middot; <b>a s d f</b> saltar &middot; <b>Cmd/Ctrl+K</b> palette &middot; setas navegam</div>
+
+<!-- painel -->
+<div class="panel" id="panel">
+  <div class="statusbar">
+    <div class="logo"></div>
+    <div class="title">KX Cockpit</div>
+    <div class="spacer"></div>
+    <span class="pill" id="vpnpill"><span class="dot" style="background:var(--ok)"></span> VPN ok</span>
+    <button class="icobtn" title="Settings" onclick="openSettings()">&#9881;</button>
+    <button class="icobtn" title="Daemon / Sair">&#9211;</button>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+
+  <div class="controls">
+    <div class="searchrow">
+      <div class="search">
+        <span style="opacity:.6">&#128269;</span>
+        <input id="search" placeholder="buscar atividade, modulo, branch...   ( / )" oninput="render()">
+      </div>
+      <select id="statusf" onchange="render()">
+        <option value="active">Em andamento</option>
+        <option value="blocked">Bloqueadas</option>
+        <option value="pending">Pendentes</option>
+        <option value="done">Concluidas</option>
+        <option value="all">Todas</option>
+      </select>
+    </div>
+    <div class="sortrow">
+      ordenar:
+      <button class="chipbtn on" data-sort="recent" onclick="setSort(this)">recentes</button>
+      <button class="chipbtn" data-sort="entrega" onclick="setSort(this)">entrega</button>
+      <button class="chipbtn" data-sort="criacao" onclick="setSort(this)">criacao</button>
+      <span class="count" id="count"></span>
+    </div>
+  </div>
+
+  <div class="warnbar" id="warnbar" style="display:none"></div>
+  <div class="body" id="list"></div>
+
+  <div class="footer">
+    <span id="orphan">1 sessao ativa sem atividade &rarr; associar</span>
+    <span class="kbd" onclick="openCmdk()">Cmd K</span>
+  </div>
+</div>
+
+<!-- command palette -->
+<div class="cmdk" id="cmdk" onclick="if(event.target.id==='cmdk')closeCmdk()">
+  <div class="cmdbox">
+    <input id="cmdinput" placeholder="Digite um comando..." oninput="renderCmd()">
+    <div class="cmdlist" id="cmdlist"></div>
+  </div>
+</div>
+
+<!-- settings -->
+<div class="settings" id="settings" onclick="if(event.target.id==='settings')closeSettings()">
+  <div class="setbox">
+    <div class="sethead">Configuracoes <button class="icobtn" onclick="closeSettings()">&times;</button></div>
+    <div class="setsec">
+      <h4>Aparencia</h4>
+      <div class="row"><label>Transparencia</label>
+        <input type="range" min="15" max="100" value="60" id="opacity" oninput="setOpacity(this.value)">
+        <span class="val" id="opval">60%</span></div>
+      <div class="row"><label>Material de vibrancy</label>
+        <select><option>hudWindow</option><option>popover</option><option>underWindow</option></select></div>
+      <div class="row"><label>Tema</label>
+        <select><option>Seguir sistema</option><option>Escuro</option><option>Claro</option></select></div>
+      <div class="row"><label>Densidade</label>
+        <div class="swrow"><button class="chipbtn on">confortavel</button><button class="chipbtn">compacta</button></div></div>
+    </div>
+    <div class="setsec">
+      <h4>Terminal e retomada</h4>
+      <div class="row"><label>Terminal preferido</label>
+        <select><option>Warp</option><option>iTerm2</option><option>Terminal</option></select></div>
+      <div class="row"><label>Acao ao acionar</label>
+        <select><option>focar ou abrir</option><option>sempre abrir nova aba</option><option>so copiar comando</option></select></div>
+      <div class="row"><label>--dangerously-skip-permissions</label>
+        <div class="swrow"><button class="chipbtn on">ligado</button><button class="chipbtn">desligado</button></div></div>
+      <div class="row"><label>Prefixar cd projectRoot</label>
+        <div class="swrow"><button class="chipbtn on">ligado</button><button class="chipbtn">desligado</button></div></div>
+    </div>
+    <div class="setsec">
+      <h4>Atalhos</h4>
+      <div class="row"><label>Abrir Cockpit (global)</label><span class="chip">Cmd Shift Space</span></div>
+      <div class="row"><label>Ir para fase2</label><span class="chip">Cmd Ctrl 1</span></div>
+    </div>
+    <div class="setsec">
+      <h4>Notificacoes e alarme</h4>
+      <div class="row"><label>Sessao terminou</label><div class="swrow"><button class="chipbtn on">ligado</button></div></div>
+      <div class="row"><label>MR mudou de estado</label><div class="swrow"><button class="chipbtn on">ligado</button></div></div>
+      <div class="row"><label>Som</label><div class="swrow"><button class="chipbtn">ligado</button><button class="chipbtn on">desligado</button></div></div>
+    </div>
+    <div class="setsec">
+      <h4>Daemon (kxd)</h4>
+      <div class="row"><label>Endereco</label><span class="chip">127.0.0.1:7717</span></div>
+      <div class="row"><label>Status</label><span class="pill"><span class="dot" style="background:var(--ok)"></span> rodando</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- dados mock (por projeto, isolados) ---------- */
+const PROJECTS = [
+  {id:'fase2',   name:'Projeto A', color:'#6366f1', active:3, blocked:1, vpn:true},
+  {id:'project-b', name:'Projeto B',           color:'#22c55e', active:2, blocked:0, vpn:false},
+  {id:'kx',      name:'KX',                 color:'#f59e0b', active:1, blocked:0, vpn:false},
+  {id:'setupia', name:'setup.ia',           color:'#ec4899', active:0, blocked:0, vpn:false},
+];
+
+const ACT = {
+  fase2:[
+    {id:7,name:'feature de exemplo - reconciliacao por IP',squad:'pdv-core',mod:'Edge Bootstrap',status:'active',sess:'running',
+     age:'ha 2h',ts:5,branches:['mw:feature/onboard-v4','bff:feat/onboard'],
+     mrs:[{t:'service-a !123',s:'approved'},{t:'service-b !456',s:'review'}],azure:'Azure 12345 (Active)',
+     log:'reconciliacao por boot provada E2E local'},
+    {id:11,name:'Hotfix config-broker subject Avro',squad:'integracoes',mod:'config-broker',status:'active',sess:'idle',
+     age:'ha 5h',ts:4,branches:['cfg:hotfix/subject-strategy'],
+     mrs:[{t:'!16',s:'review'}],azure:'Azure 12902 (Active)',log:'E2E pos-deploy pendente (SR PrivateLink)'},
+    {id:14,name:'PIX QR Display Controls',squad:'pdv-core',mod:'Frontend',status:'active',sess:'unknown',
+     age:'ha 3d',ts:2,branches:['front:feat/pix-qr'],mrs:[],azure:'',log:'aguardando review no develop'},
+    {id:9,name:'Hotfix DLQ Kafka',squad:'integracoes',mod:'Middleware',status:'blocked',sess:'blocked',
+     age:'ontem',ts:3,branches:['mw:hotfix/dlq'],mrs:[{t:'mw !169',s:'merged'}],azure:'Azure 12771 (Active)',
+     log:'aguardando secret DLQ no Secret Manager (infra)'},
+    {id:2,name:'Unificacao STORE_CODE/TERMINAL_ID',squad:'pdv-core',mod:'Identidade',status:'done',sess:'ended',
+     age:'ha 6d',ts:1,branches:['mw:feat/identity'],mrs:[{t:'service-a !123',s:'merged'}],azure:'Azure 11901 (Closed)',
+     log:'MRs mergeados; produto de referência dev+qa normalizados'},
+  ],
+  project-b:[
+    {id:3,name:'Analise auto K000018158 - DLQ',squad:'transversal',mod:'Backend NestJS',status:'active',sess:'running',
+     age:'ha 40min',ts:5,branches:['api:fix/auto-dlq'],mrs:[{t:'!88',s:'review'}],azure:'',log:'root cause na ponte Kotlin'},
+    {id:5,name:'Relatorio terceirizados mensal',squad:'transversal',mod:'App Flutter',status:'active',sess:'idle',
+     age:'ha 2d',ts:3,branches:['app:feat/report'],mrs:[],azure:'',log:'coletando timestamps de QA'},
+  ],
+  kx:[
+    {id:1,name:'KX Cockpit - daemon kxd',squad:'transversal',mod:'kx daemon',status:'active',sess:'running',
+     age:'agora',ts:5,branches:['kx:feat/megabrain-tools'],mrs:[],azure:'',log:'escrevendo a spec + prototipo'},
+  ],
+  setupia:[],
+};
+
+let state = {project:'fase2', sort:'recent', sel:0};
+const KEYS='asdfghjkl';
+
+/* ---------- render ---------- */
+function renderTabs(){
+  const el=document.getElementById('tabs'); el.innerHTML='';
+  PROJECTS.forEach(p=>{
+    const t=document.createElement('div');
+    t.className='tab'+(p.id===state.project?' active':'');
+    if(p.id===state.project) t.style.background=p.color;
+    t.innerHTML=`<span class="swatch" style="background:${p.id===state.project?'#fff':p.color}"></span>${p.name.split(' ')[0]==='Lojas'?'fase2':p.name} `+
+      (p.active?`<span class="cnt">${p.active}</span>`:'');
+    t.onclick=()=>{state.project=p.id; state.sel=0; document.getElementById('search').value=''; render();};
+    el.appendChild(t);
+  });
+  const add=document.createElement('div'); add.className='tab add'; add.textContent='+'; el.appendChild(add);
+}
+
+function currentList(){
+  const q=document.getElementById('search').value.toLowerCase();
+  const sf=document.getElementById('statusf').value;
+  let arr=(ACT[state.project]||[]).slice();
+  if(sf!=='all') arr=arr.filter(a=>a.status===sf);
+  if(q) arr=arr.filter(a=>(a.name+a.mod+a.squad+a.branches.join(' ')).toLowerCase().includes(q));
+  if(state.sort==='recent') arr.sort((a,b)=>b.ts-a.ts);
+  if(state.sort==='criacao') arr.sort((a,b)=>a.id-b.id);
+  if(state.sort==='entrega') arr.sort((a,b)=>a.ts-b.ts);
+  return arr;
+}
+
+const STCOLOR={active:'var(--run)',blocked:'var(--warn)',pending:'var(--idle)',done:'var(--ok)'};
+
+function render(){
+  renderTabs();
+  const proj=PROJECTS.find(p=>p.id===state.project);
+  // faixa de VPN degradada (exemplo no fase2 quando "cai")
+  const wb=document.getElementById('warnbar');
+  if(window._vpnDown && proj.vpn){ wb.style.display='flex'; wb.innerHTML='&#9888; VPN do ambiente desconectada - correlacao pausada (ultimo dado 14:05) &nbsp; <button class="act" onclick="_vpnDown=false;document.getElementById(\'vpnpill\').innerHTML=\'<span class=dot style=background:var(--ok)></span> VPN ok\';render()">reconectar</button>'; }
+  else wb.style.display='none';
+
+  const arr=currentList();
+  document.getElementById('count').textContent=arr.length+(arr.length===1?' atividade':' atividades');
+  const list=document.getElementById('list');
+  if(state.sel>=arr.length) state.sel=Math.max(0,arr.length-1);
+  if(!arr.length){ list.innerHTML='<div class="empty">Nenhuma atividade aqui.<br><br><button class="act primary">Criar atividade</button></div>'; return; }
+  list.innerHTML='';
+  arr.forEach((a,i)=>{
+    const div=document.createElement('div');
+    div.className='item'+(i===state.sel?' sel':'');
+    div.onclick=()=>{state.sel=i; render();};
+    const sessBadge = a.sess==='running'?'<span class="sess running">running</span>'
+      : a.sess==='blocked'?'<span class="sess blocked">bloqueado</span>'
+      : a.sess==='idle'?'<span class="sess">idle</span>'
+      : a.sess==='ended'?'<span class="sess">ended</span>':'<span class="sess">?</span>';
+    const mrs=a.mrs.map(m=>{
+      const deg=(window._vpnDown&&proj.vpn)?' degraded':'';
+      const cls=m.s; const col=m.s==='approved'?'var(--ok)':m.s==='review'?'var(--warn)':'var(--accent)';
+      const lbl=m.s==='approved'?'aprovado':m.s==='review'?'aguardando review':'merged';
+      return `<span class="mr ${cls}${deg}"><span class="d" style="background:${col}"></span>MR ${m.t} ${deg?'?':lbl}</span>`;
+    }).join('');
+    div.innerHTML=`
+      <div class="key">${KEYS[i]||''}</div>
+      <div>
+        <div class="it-title"><span class="st" style="background:${STCOLOR[a.status]}"></span>
+          <span class="name">${a.name}</span>${sessBadge}</div>
+        <div class="meta">${a.squad} &middot; ${a.mod} &middot; atualizada ${a.age}</div>
+        ${a.branches.length?`<div class="branches">${a.branches.map(b=>`<span class="chip">${b}</span>`).join('')}</div>`:''}
+        ${mrs?`<div class="mrs">${mrs}</div>`:''}
+        ${a.azure?`<div class="azure">&#9737; ${a.azure}</div>`:''}
+        ${a.log?`<div class="lastlog">"${a.log}"</div>`:''}
+        <div class="actions">
+          <button class="act primary" onclick="event.stopPropagation();flash('Abrindo sessao no Warp...')">&#9654; Saltar p/ sessao</button>
+          <button class="act" onclick="event.stopPropagation();flash('Comando copiado')">Copiar comando</button>
+          <button class="act" onclick="event.stopPropagation();flash('Concluida')">Concluir</button>
+        </div>
+      </div>`;
+    list.appendChild(div);
+  });
+}
+
+function setSort(btn){document.querySelectorAll('[data-sort]').forEach(b=>b.classList.remove('on'));btn.classList.add('on');state.sort=btn.dataset.sort;render();}
+function setOpacity(v){document.documentElement.style.setProperty('--surface-opacity',(v/100).toFixed(2));document.getElementById('opval').textContent=v+'%';}
+
+/* ---------- panel toggle ---------- */
+function togglePanel(){const p=document.getElementById('panel');p.style.display=(p.style.display==='none')?'flex':'none';}
+
+/* ---------- command palette ---------- */
+const CMDS=[
+  {t:'Saltar para sessao selecionada',k:'Enter'},
+  {t:'Copiar comando de retomada',k:''},
+  {t:'Concluir atividade selecionada',k:''},
+  {t:'Marcar avanco',k:''},{t:'Marcar bloqueio',k:''},
+  {t:'Abrir MR no browser',k:''},{t:'Atualizar correlacao (DevOps)',k:''},
+  {t:'Trocar para projeto: Projeto B',k:''},{t:'Trocar para projeto: KX',k:''},
+  {t:'Abrir Settings',k:'Cmd ,'},{t:'Reiniciar daemon kxd',k:''},
+  {t:'Simular queda de VPN (demo)',k:''},
+];
+let cmdSel=0;
+function openCmdk(){document.getElementById('cmdk').classList.add('open');document.getElementById('cmdinput').value='';cmdSel=0;renderCmd();document.getElementById('cmdinput').focus();}
+function closeCmdk(){document.getElementById('cmdk').classList.remove('open');}
+function renderCmd(){
+  const q=document.getElementById('cmdinput').value.toLowerCase();
+  const arr=CMDS.filter(c=>c.t.toLowerCase().includes(q));
+  const el=document.getElementById('cmdlist');el.innerHTML='';
+  arr.forEach((c,i)=>{const d=document.createElement('div');d.className='cmd'+(i===cmdSel?' sel':'');
+    d.innerHTML=`&#9656; ${c.t} ${c.k?`<span class="c-key">${c.k}</span>`:''}`;
+    d.onclick=()=>runCmd(c);el.appendChild(d);});
+  el._arr=arr;
+}
+function runCmd(c){
+  closeCmdk();
+  if(c.t.includes('VPN')){window._vpnDown=true;document.getElementById('vpnpill').innerHTML='<span class="dot" style="background:var(--bad)"></span> VPN down';}
+  else if(c.t.includes('projeto-b')){state.project='project-b';}
+  else if(c.t.includes('KX')){state.project='kx';}
+  else if(c.t.includes('Settings')){openSettings();}
+  else flash(c.t);
+  render();
+}
+
+/* ---------- settings ---------- */
+function openSettings(){document.getElementById('settings').classList.add('open');}
+function closeSettings(){document.getElementById('settings').classList.remove('open');}
+
+/* ---------- feedback ---------- */
+function flash(msg){
+  const f=document.createElement('div');f.textContent=msg;
+  f.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:80;background:rgba(99,102,241,.9);color:#fff;padding:10px 18px;border-radius:10px;font:600 13px var(--font);box-shadow:0 10px 30px rgba(0,0,0,.5)';
+  document.body.appendChild(f);setTimeout(()=>f.remove(),1400);
+}
+
+/* ---------- teclado ---------- */
+document.addEventListener('keydown',e=>{
+  const cmdk=document.getElementById('cmdk').classList.contains('open');
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();cmdk?closeCmdk():openCmdk();return;}
+  if(cmdk){
+    const arr=document.getElementById('cmdlist')._arr||[];
+    if(e.key==='ArrowDown'){cmdSel=Math.min(cmdSel+1,arr.length-1);renderCmd();e.preventDefault();}
+    if(e.key==='ArrowUp'){cmdSel=Math.max(cmdSel-1,0);renderCmd();e.preventDefault();}
+    if(e.key==='Enter'&&arr[cmdSel])runCmd(arr[cmdSel]);
+    if(e.key==='Escape')closeCmdk();
+    return;
+  }
+  if(document.getElementById('settings').classList.contains('open')){if(e.key==='Escape')closeSettings();return;}
+  if(e.key==='/'){document.getElementById('search').focus();e.preventDefault();return;}
+  if(e.target.id==='search'){ if(e.key==='Escape'){e.target.blur();} if(e.key!=='ArrowDown'&&e.key!=='ArrowUp'&&e.key!=='Enter')return; }
+  const arr=currentList();
+  if(e.key==='ArrowDown'){state.sel=Math.min(state.sel+1,arr.length-1);render();e.preventDefault();}
+  if(e.key==='ArrowUp'){state.sel=Math.max(state.sel-1,0);render();e.preventDefault();}
+  if(e.key==='Enter'&&arr[state.sel]){flash('Abrindo "'+arr[state.sel].name+'" no Warp...');}
+  const ki=KEYS.indexOf(e.key.toLowerCase());
+  if(ki>=0&&ki<arr.length&&!e.metaKey&&!e.ctrlKey){state.sel=ki;render();flash('Saltar p/ sessao: '+arr[ki].name);}
+});
+
+render();
+</script>
+</body>
+</html>
