@@ -9,7 +9,9 @@ const packageRoot = resolve(__dirname, '..');
 // Se não recebeu --cwd, usa o diretório atual do chamador
 const cwdArgIndex = process.argv.indexOf('--cwd');
 if (cwdArgIndex !== -1 && process.argv[cwdArgIndex + 1]) {
-  process.chdir(process.argv[cwdArgIndex + 1]);
+  const projectRoot = process.argv[cwdArgIndex + 1];
+  process.env.KX_PROJECT_ROOT = projectRoot;
+  process.chdir(projectRoot);
   process.argv.splice(cwdArgIndex, 2);
 }
 
