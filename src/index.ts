@@ -12,8 +12,10 @@ if (command === 'daemon') {
 } else if (command === 'mcp') {
   // Modo MCP: sem output no stdout (apenas stderr para logs)
   const { loadConfig } = await import('./config.js');
+  const { parseMcpBootOptions } = await import('./mcp-options.js');
   const { startMcpServer } = await import('./mcp-server.js');
-  const config = loadConfig();
+  const options = parseMcpBootOptions(args.slice(1));
+  const config = loadConfig(options.projectRoot);
   startMcpServer(config).catch((error) => {
     console.error('Erro ao iniciar MCP server:', error);
     process.exit(1);

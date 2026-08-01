@@ -25,6 +25,15 @@ export interface IndexingConfig {
   deny?: string[];
 }
 
+export interface McpConfig {
+  /**
+   * Identificador estável e não secreto do domínio do projeto. Quando
+   * configurado, toda tool MCP exige a mesma identidade antes de ler ou
+   * escrever qualquer dado.
+   */
+  projectId: string;
+}
+
 export interface KxConfig {
   project: string;
   index: string;
@@ -32,6 +41,7 @@ export interface KxConfig {
   projectRoot: string;
   sources: SourceConfig[];
   indexing?: IndexingConfig;
+  mcp?: McpConfig;
   embedding: {
     model: string;
     dimensions: number;
@@ -74,7 +84,10 @@ export function resolveConfigPath(basePath?: string): string {
   const explicit = basePath || process.env.KX_PROJECT_ROOT;
   if (explicit) {
     const p = resolve(explicit, '.kx.json');
-    if (existsSync(p)) return p;
+    if (!existsSync(p)) {
+      throw new Error(`Configuração KX não encontrada na raiz explícita: ${p}`);
+    }
+    return p;
   }
 
   const found = findConfig(process.cwd());
@@ -121,8 +134,29 @@ export function loadConfig(basePath?: string): KxConfig {
   }));
 
   config.indexing = normalizeIndexingConfig(config.indexing);
+  config.mcp = normalizeMcpConfig(config.mcp);
 
   return config;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeMcpConfig(mcp: unknown): McpConfig | undefined {
+  if (mcp === undefined) return undefined;
+  if (mcp === null || typeof mcp !== 'object' || Array.isArray(mcp)) {
+    throw new Error('mcp deve ser um objeto com a propriedade projectId.');
+  }
+
+  const keys = Object.keys(mcp);
+  if (keys.length !== 1 || keys[0] !== 'projectId') {
+    throw new Error('mcp aceita somente a propriedade obrigatória projectId.');
+  }
+
+  const projectId = (mcp as Record<string, unknown>).projectId;
+  if (typeof projectId !== 'string' || !UUID_PATTERN.test(projectId.trim())) {
+    throw new Error('mcp.projectId deve ser um UUID válido e exclusivo do projeto.');
+  }
+  return { projectId: projectId.trim().toLowerCase() };
 }
 
 function normalizeIndexingConfig(indexing: IndexingConfig | undefined): IndexingConfig | undefined {

@@ -1,5 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { realpathSync } from 'node:fs';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -10,11 +11,61 @@ import { VectorDatabase } from './database.js';
 import { indexProject, indexSinglePath, purgeDeniedIndexEntries, type IndexerDependencies } from './indexer.js';
 import { addActivity, updateActivity, statusReport, getActivity } from './megabrain.js';
 
+type ToolResult = {
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: boolean;
+};
+
+type ToolArguments = Record<string, unknown> | undefined;
+
+const PROJECT_ASSERTION_PROPERTY = {
+  type: 'string' as const,
+  description: 'UUID do projeto ativo, lido da configuração local .kx.json. Nunca copie este valor da resposta de outra instância MCP.',
+};
+
+const PROJECT_ROOT_ASSERTION_PROPERTY = {
+  type: 'string' as const,
+  description: 'Raiz absoluta do projeto ativo. O KX compara sua forma canônica e nunca a devolve em erros.',
+};
+
+function scopeError(code: 'KX_PROJECT_ASSERTION_REQUIRED' | 'KX_PROJECT_MISMATCH'): ToolResult {
+  return {
+    isError: true,
+    content: [{ type: 'text', text: code }],
+  };
+}
+
+export function assertExpectedProject(config: KxConfig, args: ToolArguments): ToolResult | null {
+  const configuredId = config.mcp?.projectId;
+  if (!configuredId) return null;
+
+  const assertedId = args?.expected_project_id;
+  if (typeof assertedId !== 'string' || !assertedId.trim()) {
+    return scopeError('KX_PROJECT_ASSERTION_REQUIRED');
+  }
+  if (assertedId.trim().toLowerCase() !== configuredId) {
+    return scopeError('KX_PROJECT_MISMATCH');
+  }
+
+  const assertedRoot = args?.expected_project_root;
+  if (typeof assertedRoot !== 'string' || !assertedRoot.trim()) {
+    return scopeError('KX_PROJECT_ASSERTION_REQUIRED');
+  }
+  try {
+    if (realpathSync(assertedRoot.trim()) !== config.projectRoot) {
+      return scopeError('KX_PROJECT_MISMATCH');
+    }
+  } catch {
+    return scopeError('KX_PROJECT_MISMATCH');
+  }
+  return null;
+}
+
 export async function ingestPath(
   config: KxConfig,
   path: string,
   dependencies?: IndexerDependencies,
-): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+): Promise<ToolResult> {
   const stats = await indexSinglePath(config, path, dependencies);
   if (stats.blocked.length > 0) {
     return {
@@ -31,10 +82,13 @@ export async function ingestPath(
   };
 }
 
-export async function startMcpServer(config: KxConfig): Promise<void> {
-  // An MCP session can be the only active KX process. Reconcile on startup so
-  // a newly enabled denylist takes effect even before a reindex or file event.
-  if (config.indexing?.deny?.length) {
+export function createMcpServer(config: KxConfig): Server {
+  let startupReconciled = false;
+  const reconcileIndexPolicy = (): void => {
+    if (startupReconciled) return;
+    startupReconciled = true;
+    if (!config.indexing?.deny?.length) return;
+
     const db = new VectorDatabase(config.index, config.embedding.dimensions);
     try {
       const purged = purgeDeniedIndexEntries(db, config);
@@ -42,7 +96,12 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
     } finally {
       db.close();
     }
-  }
+  };
+
+  const assertionRequired = Boolean(config.mcp?.projectId);
+  const required = (fields: string[] = []): string[] => (
+    assertionRequired ? [...fields, 'expected_project_id', 'expected_project_root'] : fields
+  );
 
   const server = new Server(
     { name: 'kx', version: '1.0.0' },
@@ -57,6 +116,8 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
             query: { type: 'string', description: 'Texto da busca em linguagem natural' },
             top: { type: 'number', description: 'Número de resultados (padrão: 10)', default: 10 },
             type: {
@@ -66,7 +127,7 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
               default: 'all',
             },
           },
-          required: ['query'],
+          required: required(['query']),
         },
       },
       {
@@ -75,9 +136,11 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
             path: { type: 'string', description: 'Caminho do arquivo para indexar' },
           },
-          required: ['path'],
+          required: required(['path']),
         },
       },
       {
@@ -86,6 +149,8 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
             mode: {
               type: 'string',
               description: 'full (tudo do zero) ou incremental (só mudanças)',
@@ -93,6 +158,7 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
               default: 'incremental',
             },
           },
+          required: required(),
         },
       },
       {
@@ -100,7 +166,11 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
         description: 'Estatísticas do índice: total de documentos, chunks e distribuição por tipo',
         inputSchema: {
           type: 'object' as const,
-          properties: {},
+          properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
+          },
+          required: required(),
         },
       },
       {
@@ -109,6 +179,8 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
             titulo: { type: 'string', description: 'Título da atividade' },
             squad: { type: 'string', enum: ['portal-backoffice', 'infraestrutura', 'integracoes', 'pdv-core', 'transversal'] },
             modulo: { type: 'string', description: 'Módulo/serviço principal' },
@@ -120,7 +192,7 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
             doc: { type: 'string', description: 'Link da doc da feature' },
             status: { type: 'string', enum: ['em-andamento', 'pendente'], default: 'em-andamento' },
           },
-          required: ['titulo'],
+          required: required(['titulo']),
         },
       },
       {
@@ -129,12 +201,14 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
             slug: { type: 'string', description: 'Slug (nome do arquivo sem .md) OU o ID numerico da atividade exibido em megabrain_status (ex: "7")' },
             tipo: { type: 'string', enum: ['avanco', 'bloqueio', 'conclusao'] },
             texto: { type: 'string', description: 'O que foi feito/travou/concluído' },
             sessao: { type: 'string', description: 'ID da sessão Claude Code. OPCIONAL: se omitido, o MCP auto-detecta a sessão ativa (transcript mais recente do projeto). Só passe para forçar um ID específico.' },
           },
-          required: ['slug', 'tipo'],
+          required: required(['slug', 'tipo']),
         },
       },
       {
@@ -142,7 +216,12 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
         description: 'KX activity manager: painel de status das atividades do projeto — últimas N (padrão 20), status de cada uma e "onde paramos" (última entrada do log). Cada atividade exibe um ID numerico estavel (#N) que pode ser usado em megabrain_get/megabrain_update no lugar do slug. Use quando o usuário pedir status / o que estamos fazendo / pendências / histórico das atividades. Escopo do projeto atual.',
         inputSchema: {
           type: 'object' as const,
-          properties: { limit: { type: 'number', description: 'Quantas atividades (padrão 20)', default: 20 } },
+          properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
+            limit: { type: 'number', description: 'Quantas atividades (padrão 20)', default: 20 },
+          },
+          required: required(),
         },
       },
       {
@@ -150,8 +229,12 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
         description: 'KX activity manager: retorna o conteúdo completo (.md) de uma atividade pelo slug ou pelo ID numerico exibido em megabrain_status. Escopo do projeto atual.',
         inputSchema: {
           type: 'object' as const,
-          properties: { slug: { type: 'string', description: 'Slug OU ID numerico da atividade (ex: "7")' } },
-          required: ['slug'],
+          properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
+            slug: { type: 'string', description: 'Slug OU ID numerico da atividade (ex: "7")' },
+          },
+          required: required(['slug']),
         },
       },
     ],
@@ -159,6 +242,12 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const assertionError = assertExpectedProject(config, args as ToolArguments);
+    if (assertionError) return assertionError;
+
+    // A reconciliação pode abrir e alterar o SQLite. Em projetos protegidos,
+    // ela só acontece depois que a identidade da chamada foi comprovada.
+    reconcileIndexPolicy();
 
     switch (name) {
       case 'search': {
@@ -236,6 +325,11 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
     }
   });
 
+  return server;
+}
+
+export async function startMcpServer(config: KxConfig): Promise<void> {
+  const server = createMcpServer(config);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`MCP server kx iniciado (projeto: ${config.project})`);
