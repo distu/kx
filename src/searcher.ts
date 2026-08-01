@@ -2,6 +2,14 @@ import { relative } from 'path';
 import type { KxConfig, SourceConfig } from './config.js';
 import { VectorDatabase, type SearchResult } from './database.js';
 import { initEmbedder, embed } from './embedder.js';
+import { purgeDeniedIndexEntries } from './indexer.js';
+
+export interface SearchDependencies {
+  initEmbedder: (model: string) => Promise<void>;
+  embed: (text: string) => Promise<Float32Array>;
+}
+
+const defaultDependencies: SearchDependencies = { initEmbedder, embed };
 
 // Sobre-busca aplicada apenas quando ao menos uma fonte configura `weight` > 1,
 // para permitir que resultados priorizados "subam" no ranking mesmo que não
@@ -41,35 +49,37 @@ export async function search(
   config: KxConfig,
   query: string,
   topK: number = 10,
-  sourceType?: string
+  sourceType?: string,
+  dependencies: SearchDependencies = defaultDependencies,
 ): Promise<SearchResult[]> {
   const db = new VectorDatabase(config.index, config.embedding.dimensions);
-  await initEmbedder(config.embedding.model);
+  try {
+    // Search may be the first KX command after a policy change. Reconcile
+    // before embedding the query so stale denied chunks cannot be returned.
+    purgeDeniedIndexEntries(db, config);
+    await dependencies.initEmbedder(config.embedding.model);
+    const queryEmbedding = await dependencies.embed(query);
 
-  const queryEmbedding = await embed(query);
+    // Caminho padrão: nenhuma fonte com peso configurado -> comportamento
+    // idêntico ao anterior quando a denylist opt-in não está configurada.
+    if (!hasWeightedSources(config.sources)) {
+      return db.search(queryEmbedding, topK, sourceType);
+    }
 
-  // Caminho padrão: nenhuma fonte com peso configurado -> comportamento
-  // idêntico ao anterior, byte a byte (zero mudança para quem não configurar).
-  if (!hasWeightedSources(config.sources)) {
-    const results = db.search(queryEmbedding, topK, sourceType);
+    const overfetchK = Math.min(topK * OVERFETCH_FACTOR, OVERFETCH_CAP);
+    const rawResults = db.search(queryEmbedding, overfetchK, sourceType);
+
+    return rawResults
+      .map(r => {
+        const weight = resolveWeight(r.path, config.sources, config.projectRoot);
+        return { result: r, adjustedDistance: r.distance / weight };
+      })
+      .sort((a, b) => a.adjustedDistance - b.adjustedDistance)
+      .slice(0, topK)
+      .map(r => r.result);
+  } finally {
     db.close();
-    return results;
   }
-
-  const overfetchK = Math.min(topK * OVERFETCH_FACTOR, OVERFETCH_CAP);
-  const rawResults = db.search(queryEmbedding, overfetchK, sourceType);
-
-  const reranked = rawResults
-    .map(r => {
-      const weight = resolveWeight(r.path, config.sources, config.projectRoot);
-      return { result: r, adjustedDistance: r.distance / weight };
-    })
-    .sort((a, b) => a.adjustedDistance - b.adjustedDistance)
-    .slice(0, topK)
-    .map(r => r.result);
-
-  db.close();
-  return reranked;
 }
 
 export function getStatus(config: KxConfig) {

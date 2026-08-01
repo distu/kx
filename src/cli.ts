@@ -61,6 +61,8 @@ export function createCli(config: KxConfig): Command {
       console.log(`  Arquivos processados: ${stats.filesProcessed}`);
       console.log(`  Chunks criados: ${stats.chunksCreated}`);
       console.log(`  Arquivos ignorados (sem mudanças): ${stats.filesSkipped}`);
+      console.log(`  Paths bloqueados removidos: ${stats.filesPurged}`);
+      console.log(`  Bloqueios aplicados no scan: ${stats.blocked.length}`);
 
       if (stats.errors.length > 0) {
         console.log(`  Erros: ${stats.errors.length}`);

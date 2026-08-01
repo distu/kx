@@ -6,10 +6,44 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { KxConfig } from './config.js';
 import { search, getStatus } from './searcher.js';
-import { indexProject, indexSinglePath } from './indexer.js';
+import { VectorDatabase } from './database.js';
+import { indexProject, indexSinglePath, purgeDeniedIndexEntries, type IndexerDependencies } from './indexer.js';
 import { addActivity, updateActivity, statusReport, getActivity } from './megabrain.js';
 
+export async function ingestPath(
+  config: KxConfig,
+  path: string,
+  dependencies?: IndexerDependencies,
+): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+  const stats = await indexSinglePath(config, path, dependencies);
+  if (stats.blocked.length > 0) {
+    return {
+      isError: true,
+      content: [{ type: 'text', text: `Ingestão bloqueada pela política do projeto:\n${stats.blocked.join('\n')}` }],
+    };
+  }
+
+  return {
+    content: [{
+      type: 'text',
+      text: `Indexado: ${stats.filesProcessed} arquivo(s), ${stats.chunksCreated} chunk(s)${stats.errors.length > 0 ? '\nErros: ' + stats.errors.join(', ') : ''}`,
+    }],
+  };
+}
+
 export async function startMcpServer(config: KxConfig): Promise<void> {
+  // An MCP session can be the only active KX process. Reconcile on startup so
+  // a newly enabled denylist takes effect even before a reindex or file event.
+  if (config.indexing?.deny?.length) {
+    const db = new VectorDatabase(config.index, config.embedding.dimensions);
+    try {
+      const purged = purgeDeniedIndexEntries(db, config);
+      if (purged > 0) console.error(`Removidos ${purged} caminho(s) bloqueado(s) do índice.`);
+    } finally {
+      db.close();
+    }
+  }
+
   const server = new Server(
     { name: 'kx', version: '1.0.0' },
     { capabilities: { tools: {} } }
@@ -19,7 +53,7 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
     tools: [
       {
         name: 'search',
-        description: 'Busca semântica na documentação, código e vault do projeto. Use para encontrar padrões, decisões de arquitetura, endpoints, configurações, credenciais e qualquer informação do projeto. REGRA: ao usar resultados desta busca para gerar texto em português, SEMPRE aplicar acentuação correta (ã, é, í, ó, ú, ç, à, â, ê, ô, õ). Os chunks indexados podem conter texto sem acentos - corrija ao reproduzir.',
+        description: 'Busca semântica na documentação, código e notas do projeto. Use para encontrar padrões, decisões de arquitetura, endpoints e configurações que tenham sido explicitamente indexados. REGRA: ao usar resultados desta busca para gerar texto em português, SEMPRE aplicar acentuação correta (ã, é, í, ó, ú, ç, à, â, ê, ô, õ). Os chunks indexados podem conter texto sem acentos - corrija ao reproduzir.',
         inputSchema: {
           type: 'object' as const,
           properties: {
@@ -148,13 +182,7 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
 
       case 'ingest': {
         const path = (args as { path: string }).path;
-        const stats = await indexSinglePath(config, path);
-        return {
-          content: [{
-            type: 'text',
-            text: `Indexado: ${stats.filesProcessed} arquivo(s), ${stats.chunksCreated} chunk(s)${stats.errors.length > 0 ? '\nErros: ' + stats.errors.join(', ') : ''}`,
-          }],
-        };
+        return ingestPath(config, path);
       }
 
       case 'reindex': {
@@ -163,7 +191,7 @@ export async function startMcpServer(config: KxConfig): Promise<void> {
         return {
           content: [{
             type: 'text',
-            text: `Reindexação ${mode} concluída:\n- Arquivos processados: ${stats.filesProcessed}\n- Chunks criados: ${stats.chunksCreated}\n- Arquivos ignorados: ${stats.filesSkipped}${stats.errors.length > 0 ? '\n- Erros: ' + stats.errors.length : ''}`,
+            text: `Reindexação ${mode} concluída:\n- Arquivos processados: ${stats.filesProcessed}\n- Chunks criados: ${stats.chunksCreated}\n- Arquivos ignorados: ${stats.filesSkipped}\n- Paths bloqueados removidos: ${stats.filesPurged}\n- Bloqueios aplicados no scan: ${stats.blocked.length}${stats.errors.length > 0 ? '\n- Erros: ' + stats.errors.length : ''}`,
           }],
         };
       }

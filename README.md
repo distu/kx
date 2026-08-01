@@ -1,7 +1,7 @@
 # kx — Knowledge indeX
 
 > Ecossistema RAG/MCP pessoal para desenvolvimento assistido por IA.
-> Busca semântica offline em documentação, código, vault e configurações.
+> Busca semântica offline em documentação, código, notas e configurações.
 > Multi-projeto com isolamento total entre bases.
 
 ---
@@ -53,7 +53,7 @@ O Claude Code consulta o kx automaticamente antes de implementar código, fazer 
 Cada projeto tem:
 - **`.kx.json`** na raiz do projeto → define fontes e aponta para seu `.sqlite`
 - **`.mcp.json`** na raiz do projeto → registra kx como MCP server no Claude Code
-- **`.vault/`** na raiz do projeto → vault Obsidian pessoal (secrets, reuniões, decisões)
+- **`.vault/`** na raiz do projeto → notas pessoais (reuniões e decisões)
 - **`~/.kx/data/{projeto}.sqlite`** → database isolada, zero colisão
 
 O binário `~/.kx/bin/kx.js` é compartilhado. A configuração é por projeto.
@@ -97,7 +97,7 @@ Projeto C:  .kx.json → ~/.kx/data/projeto-c.sqlite
 | **Documentação** (docs) | `*.md` | Headers como limite, ~512 tokens, 10% overlap |
 | **Vault pessoal** (vault) | `*.md` no `.vault/` | Idem, wikilinks removidos na indexação |
 | **Código** (code) | `*.java`, `*.ts`, `*.tsx`, `*.sql` | Por função/método/classe, ~1024 tokens |
-| **Configuração** (config) | `*.yml`, `*.properties`, `*.json`, `*.xml`, `*.gradle`, `Dockerfile*` | Arquivo inteiro ou por seção, ~256 tokens; arquivos `.env*` devem ser excluídos |
+| **Configuração** (config) | `*.yml`, `*.properties`, `*.json`, `*.xml`, `*.gradle`, `Dockerfile*` | Arquivo inteiro ou por seção, ~256 tokens; use a denylist para arquivos que não podem ser indexados |
 
 Exclusões automáticas: `node_modules/`, `.git/`, `build/`, `target/`, `dist/`, `.obsidian/`
 
@@ -122,7 +122,7 @@ O Claude Code vê estas tools quando o kx está ativo:
 # Busca semântica
 kx search "como funciona o RBAC do PDV"
 kx search "SecurityConfig" --type code --top 3
-kx search "credenciais cluster QA" --type vault
+kx search "decisão de autenticação" --type vault
 kx search "Kong dual auth" --json
 
 # Indexação
@@ -148,7 +148,7 @@ Cada projeto tem um `.vault/` com:
 ```
 .vault/
   _index/          Maps of Content (MOCs) — índices por tema
-  _secrets/        Credenciais dev/homolog (tokens, senhas, endpoints)
+  private/         Conteúdo local que deve ser protegido pela denylist
   architecture/    Decisões e diagramas (Excalidraw)
   services/        Contexto pessoal por microsserviço
   integrations/    Fluxos entre serviços e terceiros
@@ -162,7 +162,23 @@ Cada projeto tem um `.vault/` com:
   templates/       Templates Templater (tpl-meeting, tpl-adr, etc.)
 ```
 
-**Regra**: Repo Git = equipe. Vault = pessoal. O kx indexa ambos.
+**Regra**: Repo Git = equipe. Vault = pessoal. O kx só indexa conteúdo que não seja bloqueado pela configuração do projeto.
+
+## Proteção opt-in de paths
+
+`sources[].exclude` reduz o conjunto percorrido na reindexação por fonte, mas não é uma barreira de segurança para chamadas individuais. Para impedir que um caminho seja indexado por reindexação completa, incremental, watcher ou MCP `ingest`, adicione uma denylist global ao `.kx.json`:
+
+```json
+{
+  "indexing": {
+    "deny": [".vault/private/**", "**/.env*", "**/*.key"]
+  }
+}
+```
+
+Os padrões são glob paths relativos à raiz do projeto; o prefixo opcional `./` é normalizado. A regra só vale quando `indexing.deny` é configurada; projetos sem ela preservam o comportamento existente. Busca, watcher, MCP e `kx index` reconciliam o índice para impedir que paths bloqueados continuem aparecendo nos resultados.
+
+A remoção é lógica no SQLite. Bytes antigos podem permanecer em páginas livres, WAL, snapshots ou backups. Se conteúdo sensível já tiver sido indexado, rotacione o valor, pare processos KX, remova o arquivo de índice e seus arquivos `-wal`/`-shm`, e gere um índice novo somente a partir de fontes permitidas. A denylist evita indexação e recuperação futuras; ela não transforma o KX em um cofre de segredos nem garante apagamento físico retroativo.
 
 ---
 
@@ -238,7 +254,7 @@ O design do kx foi baseado em pesquisa extensiva (80+ fontes, março 2026):
 - Multi-vault por projeto = isolamento total
 
 ### Alternativas avaliadas e descartadas
-- **1Password**: Desnecessário para credenciais dev/homolog
+- **1Password**: Fora do escopo de busca semântica local
 - **LightRAG**: Requer LLM 12B+ para extração de entidades
 - **FalkorDB**: Grafo de dependências útil mas adiciona complexidade
 - **Ollama para embeddings**: 4GB RAM vs 23MB do Transformers.js

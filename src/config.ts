@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { readFileSync, existsSync, realpathSync } from 'fs';
+import { resolve, dirname, isAbsolute } from 'path';
 import { homedir } from 'os';
 
 export interface SourceConfig {
@@ -15,12 +15,23 @@ export interface SourceConfig {
   weight?: number;
 }
 
+/**
+ * Regras globais, explicitamente opt-in, para impedir que determinados
+ * arquivos entrem no índice. Os padrões são caminhos POSIX relativos à raiz
+ * do projeto (por exemplo, um diretório `private` recursivo ou arquivos de
+ * ambiente em qualquer diretório).
+ */
+export interface IndexingConfig {
+  deny?: string[];
+}
+
 export interface KxConfig {
   project: string;
   index: string;
   /** Diretório base do .kx.json resolvido (derivado em loadConfig, não vem do JSON do usuário). */
   projectRoot: string;
   sources: SourceConfig[];
+  indexing?: IndexingConfig;
   embedding: {
     model: string;
     dimensions: number;
@@ -99,12 +110,35 @@ export function loadConfig(basePath?: string): KxConfig {
   };
 
   // Resolver paths relativos
-  config.projectRoot = base;
+  // Use the canonical root so a source reached through a system symlink (for
+  // example temporary directories on macOS) remains project-relative after
+  // `realpathSync` is applied by the central indexing gate.
+  config.projectRoot = realpathSync(base);
   config.index = resolve(base, config.index);
   config.sources = config.sources.map(s => ({
     ...s,
     path: resolve(base, s.path),
   }));
 
+  config.indexing = normalizeIndexingConfig(config.indexing);
+
   return config;
+}
+
+function normalizeIndexingConfig(indexing: IndexingConfig | undefined): IndexingConfig | undefined {
+  if (indexing?.deny === undefined) return indexing;
+  if (!Array.isArray(indexing.deny) || indexing.deny.some(pattern => typeof pattern !== 'string' || !pattern.trim())) {
+    throw new Error('indexing.deny deve ser uma lista de padrões glob não vazios.');
+  }
+
+  const deny = indexing.deny.map(pattern => {
+    let normalized = pattern.trim().replaceAll('\\', '/');
+    while (normalized.startsWith('./')) normalized = normalized.slice(2);
+    if (!normalized || isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized) || normalized.split('/').includes('..')) {
+      throw new Error(`indexing.deny aceita somente caminhos relativos à raiz do projeto: ${pattern}`);
+    }
+    return normalized;
+  });
+
+  return { ...indexing, deny };
 }
