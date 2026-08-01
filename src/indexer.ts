@@ -176,6 +176,7 @@ export async function indexSinglePath(
   config: KxConfig,
   targetPath: string,
   dependencies: IndexerDependencies = defaultDependencies,
+  sourceType?: SourceConfig['type'],
 ): Promise<IndexStats> {
   const stats: IndexStats = { filesProcessed: 0, chunksCreated: 0, filesSkipped: 0, filesPurged: 0, blocked: [], errors: [] };
   let decision;
@@ -204,15 +205,9 @@ export async function indexSinglePath(
 
     db.deleteByPath(storedPath);
 
-    // Determinar tipo pelo path
-    let type: SourceConfig['type'] = 'docs';
-    if (targetPath.endsWith('.java') || targetPath.endsWith('.ts') || targetPath.endsWith('.tsx')) {
-      type = 'code';
-    } else if (targetPath.match(/\.(yml|yaml|properties|json|gradle)$/)) {
-      type = 'config';
-    } else if (targetPath.includes('.vault/')) {
-      type = 'vault';
-    }
+    // O watcher conhece a fonte que aceitou o evento. Preservar esse tipo
+    // evita que o chunking dependa de uma lista de extensões incompleta.
+    const type = sourceType ?? inferSourceType(targetPath);
 
     const chunks = chunkByType(content, type, decision.filePath, config);
 
@@ -230,6 +225,19 @@ export async function indexSinglePath(
     db.close();
   }
   return stats;
+}
+
+function inferSourceType(targetPath: string): SourceConfig['type'] {
+  if (targetPath.endsWith('.java') || targetPath.endsWith('.ts') || targetPath.endsWith('.tsx')) {
+    return 'code';
+  }
+  if (targetPath.match(/\.(yml|yaml|properties|json|gradle)$/)) {
+    return 'config';
+  }
+  if (targetPath.includes('.vault/')) {
+    return 'vault';
+  }
+  return 'docs';
 }
 
 export function removeSinglePath(config: KxConfig, targetPath: string): void {
