@@ -164,6 +164,35 @@ export class VectorDatabase {
     this.db.prepare('DELETE FROM documents WHERE path = ?').run(path);
   }
 
+  /** Paths are returned without content so policy reconciliation never reads it. */
+  listPaths(): string[] {
+    return (this.db.prepare('SELECT DISTINCT path FROM documents').all() as Array<{ path: string }>)
+      .map(row => row.path);
+  }
+
+  /**
+   * Deletes both document text and embeddings in one SQLite transaction.
+   * The caller supplies already policy-matched paths.
+   */
+  deleteByPaths(paths: string[]): number {
+    if (paths.length === 0) return 0;
+
+    const deleteMany = this.db.transaction((targetPaths: string[]) => {
+      let removed = 0;
+      for (const path of targetPaths) {
+        const ids = this.db.prepare('SELECT id FROM documents WHERE path = ?').all(path) as Array<{ id: number }>;
+        for (const { id } of ids) {
+          this.db.prepare('DELETE FROM vec_documents WHERE document_id = ?').run(BigInt(id));
+        }
+        this.db.prepare('DELETE FROM documents WHERE path = ?').run(path);
+        if (ids.length > 0) removed++;
+      }
+      return removed;
+    });
+
+    return deleteMany(paths);
+  }
+
   getModifiedAt(path: string): number | null {
     const row = this.db.prepare(
       'SELECT MAX(modified_at) as mtime FROM documents WHERE path = ?'

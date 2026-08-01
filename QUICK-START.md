@@ -42,6 +42,9 @@
       "exclude": ["**/node_modules/**", "**/build/**", "**/.git/**", "**/.env*", "**/_secrets/**", "**/secrets/**"]
     }
   ],
+  "indexing": {
+    "deny": [".vault/private/**", "**/.env*", "**/*.key"]
+  },
   "embedding": {
     "model": "Xenova/all-MiniLM-L6-v2",
     "dimensions": 384
@@ -55,6 +58,10 @@
 ```
 
 Ajuste `sources` conforme a estrutura do projeto (paths, globs, linguagens).
+
+`sources[].exclude` serve para reduzir o scan de uma fonte. Para uma regra que também bloqueia busca, watcher e MCP `ingest`, use `indexing.deny` com padrões glob relativos à raiz do projeto. Essa proteção é opt-in: se `indexing.deny` estiver ausente, o comportamento do projeto não muda. O prefixo `./` é aceito e normalizado. Ao ativá-la, execute `kx index` uma vez para validar a configuração e reconciliar o índice imediatamente.
+
+A reconciliação impede novas buscas, mas exclusão lógica no SQLite não garante sobrescrita física de páginas livres, WAL ou backups. Se um valor sensível já tiver sido indexado, rotacione-o e reconstrua o arquivo de índice a partir de fontes permitidas.
 
 ## Passo 2: Criar `.mcp.json` na raiz do projeto (1 min)
 
@@ -73,7 +80,7 @@ Ajuste `sources` conforme a estrutura do projeto (paths, globs, linguagens).
 
 ```bash
 # Criar estrutura
-mkdir -p .vault/{_index,_secrets,architecture/{adr,diagrams},services,integrations,standards,database,meetings,decisions,sprint,team/{squads,members},cheatsheets,templates,_attachments}
+mkdir -p .vault/{_index,private,architecture/{adr,diagrams},services,integrations,standards,database,meetings,decisions,sprint,team/{squads,members},cheatsheets,templates,_attachments}
 
 # Adicionar ao .gitignore do projeto
 echo ".vault/" >> .gitignore
@@ -196,7 +203,7 @@ Copiar de qualquer vault existente ou usar Templater no Obsidian:
 | `tpl-adr.md` | Architecture Decision Record |
 | `tpl-service.md` | Contexto de microsserviço |
 | `tpl-decision.md` | Decisão técnica pessoal |
-| `tpl-secret.md` | Credencial/token |
+| `tpl-private.md` | Nota privada não indexável |
 | `tpl-sprint.md` | Contexto de sprint |
 | `tpl-squad.md` | Squad com ferramentas e membros |
 | `tpl-team-member.md` | Membro com IDs (agile + git) |

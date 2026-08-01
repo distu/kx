@@ -1,8 +1,32 @@
 import { watch } from 'chokidar';
 import type { KxConfig } from './config.js';
-import { indexSinglePath, removeSinglePath } from './indexer.js';
+import { VectorDatabase } from './database.js';
+import { indexSinglePath, purgeDeniedIndexEntries, removeSinglePath, type IndexStats, type IndexerDependencies } from './indexer.js';
+
+export async function processWatcherChange(
+  config: KxConfig,
+  filePath: string,
+  dependencies?: IndexerDependencies,
+): Promise<IndexStats | null> {
+  if (!filePath.match(/\.(md|java|ts|tsx|yml|yaml|properties|json|gradle|env)$/)) {
+    return null;
+  }
+  return indexSinglePath(config, filePath, dependencies);
+}
 
 export function startWatcher(config: KxConfig): void {
+  // Reconcile once at startup: ignored or unchanged files must not retain
+  // plaintext chunks from before an opt-in deny policy was added.
+  if (config.indexing?.deny?.length) {
+    const db = new VectorDatabase(config.index, config.embedding.dimensions);
+    try {
+      const purged = purgeDeniedIndexEntries(db, config);
+      if (purged > 0) console.error(`Removidos ${purged} caminho(s) bloqueado(s) do índice.`);
+    } finally {
+      db.close();
+    }
+  }
+
   // Observar apenas arquivos relevantes via globs específicos
   const globs: string[] = [];
   for (const source of config.sources) {
@@ -34,15 +58,10 @@ export function startWatcher(config: KxConfig): void {
   });
 
   const handleChange = async (filePath: string) => {
-    // Filtrar apenas arquivos relevantes
-    if (!filePath.match(/\.(md|java|ts|tsx|yml|yaml|properties|json|gradle|env)$/)) {
-      return;
-    }
-
     console.error(`Arquivo modificado: ${filePath}`);
     try {
-      const stats = await indexSinglePath(config, filePath);
-      if (stats.chunksCreated > 0) {
+      const stats = await processWatcherChange(config, filePath);
+      if (stats && stats.chunksCreated > 0) {
         console.error(`  Reindexado: ${stats.chunksCreated} chunk(s)`);
       }
     } catch (error) {
