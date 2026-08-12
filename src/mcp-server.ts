@@ -10,6 +10,8 @@ import { search, getStatus } from './searcher.js';
 import { VectorDatabase } from './database.js';
 import { indexProject, indexSinglePath, purgeDeniedIndexEntries, type IndexerDependencies } from './indexer.js';
 import { addActivity, updateActivity, statusReport, getActivity } from './megabrain.js';
+import { createLifecycleGuard } from './mcp-lifecycle.js';
+import { unloadIfIdle } from './embedder.js';
 
 type ToolResult = {
   content: Array<{ type: 'text'; text: string }>;
@@ -82,7 +84,12 @@ export async function ingestPath(
   };
 }
 
-export function createMcpServer(config: KxConfig): Server {
+export interface McpServerHooks {
+  /** Chamado a cada requisição recebida do cliente, antes de qualquer trabalho. */
+  onRequest?: () => void;
+}
+
+export function createMcpServer(config: KxConfig, hooks: McpServerHooks = {}): Server {
   let startupReconciled = false;
   const reconcileIndexPolicy = (): void => {
     if (startupReconciled) return;
@@ -108,7 +115,9 @@ export function createMcpServer(config: KxConfig): Server {
     { capabilities: { tools: {} } }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    hooks.onRequest?.();
+    return {
     tools: [
       {
         name: 'search',
@@ -238,9 +247,11 @@ export function createMcpServer(config: KxConfig): Server {
         },
       },
     ],
-  }));
+    };
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    hooks.onRequest?.();
     const { name, arguments: args } = request.params;
     const assertionError = assertExpectedProject(config, args as ToolArguments);
     if (assertionError) return assertionError;
@@ -329,8 +340,23 @@ export function createMcpServer(config: KxConfig): Server {
 }
 
 export async function startMcpServer(config: KxConfig): Promise<void> {
-  const server = createMcpServer(config);
+  // O guard precisa existir antes do servidor: os handlers registram atividade
+  // nele, e um cliente pode enviar a primeira requisição logo após o connect.
+  const guard = createLifecycleGuard({
+    onCheck: () => { void unloadIfIdle(); },
+    onShutdown: async () => { await server.close(); },
+  });
+
+  const server = createMcpServer(config, { onRequest: () => guard.touch() });
   const transport = new StdioServerTransport();
+
+  // Caminho normal de saída: o cliente fechou o pipe. O fim da entrada padrão é
+  // observado diretamente porque o transport só notifica o fechamento quando
+  // ele parte do servidor, e não quando a outra ponta encerra.
+  process.stdin.once('end', () => { void guard.shutdown('transport-closed'); });
+  transport.onclose = () => { void guard.shutdown('transport-closed'); };
+
   await server.connect(transport);
+  guard.start();
   console.error(`MCP server kx iniciado (projeto: ${config.project})`);
 }
