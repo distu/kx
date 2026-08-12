@@ -177,6 +177,7 @@ export async function indexSinglePath(
   targetPath: string,
   dependencies: IndexerDependencies = defaultDependencies,
   sourceType?: SourceConfig['type'],
+  sharedDb?: VectorDatabase,
 ): Promise<IndexStats> {
   const stats: IndexStats = { filesProcessed: 0, chunksCreated: 0, filesSkipped: 0, filesPurged: 0, blocked: [], errors: [] };
   let decision;
@@ -188,7 +189,9 @@ export async function indexSinglePath(
     return stats;
   }
 
-  const db = new VectorDatabase(config.index, config.embedding.dimensions);
+  // A long-lived caller (the watcher) owns its connection: reopening SQLite and
+  // reloading the vector extension per event is pure overhead.
+  const db = sharedDb ?? new VectorDatabase(config.index, config.embedding.dimensions);
   try {
     if (!decision.allowed) {
       db.deleteByPath(decision.storedPath);
@@ -222,7 +225,7 @@ export async function indexSinglePath(
     const msg = error instanceof Error ? error.message : String(error);
     stats.errors.push(`${targetPath}: ${msg}`);
   } finally {
-    db.close();
+    if (!sharedDb) db.close();
   }
   return stats;
 }
@@ -240,15 +243,15 @@ function inferSourceType(targetPath: string): SourceConfig['type'] {
   return 'docs';
 }
 
-export function removeSinglePath(config: KxConfig, targetPath: string): void {
+export function removeSinglePath(config: KxConfig, targetPath: string, sharedDb?: VectorDatabase): void {
   // Deletion deliberately bypasses admission denial: a denied file may have
   // been indexed before the policy was enabled and must still be removable.
   const decision = resolveIndexPath(config, targetPath, false);
-  const db = new VectorDatabase(config.index, config.embedding.dimensions);
+  const db = sharedDb ?? new VectorDatabase(config.index, config.embedding.dimensions);
   try {
     db.deleteByPath(decision.storedPath);
   } finally {
-    db.close();
+    if (!sharedDb) db.close();
   }
 }
 

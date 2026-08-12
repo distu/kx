@@ -6,14 +6,14 @@ import { basename, join } from 'node:path';
 import { loadConfig, type KxConfig } from '../src/config.js';
 import { VectorDatabase } from '../src/database.js';
 import type { IndexerDependencies } from '../src/indexer.js';
-import { startWatcher, type WatchEvent } from '../src/watcher.js';
+import { createIgnoreMatcher, startWatcher, type WatchEvent } from '../src/watcher.js';
 
 const dependencies: IndexerDependencies = {
   initEmbedder: async () => {},
   embed: async () => new Float32Array([0, 1]),
 };
 
-async function waitFor(assertion: () => void, timeoutMs = 5_000): Promise<void> {
+async function waitFor(assertion: () => void, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {
@@ -61,14 +61,10 @@ test('watcher indexes root events with source filters and removes renamed or del
   }));
   const config = loadConfig(root);
   const events: WatchEvent[] = [];
+  // No backend override: this exercises the recursive native watcher that runs
+  // in production, the one whose absence caused the polling meltdown.
   const handle = startWatcher(config, dependencies, {
-    chokidar: {
-      usePolling: true,
-      interval: 20,
-      binaryInterval: 20,
-      atomic: false,
-      awaitWriteFinish: { stabilityThreshold: 20, pollInterval: 5 },
-    },
+    settleMs: 50,
     onEvent: event => events.push(event),
   });
   t.after(async () => {
@@ -129,4 +125,57 @@ test('watcher indexes root events with source filters and removes renamed or del
   assert.ok(indexedPaths.includes('docs/.allowed-hidden.txt'));
   assert.ok(events.some(event => event.event === 'add' && basename(event.filePath) === 'excluded.txt' && event.action === 'removed'));
   assert.ok(events.some(event => event.event === 'add' && basename(event.filePath) === 'denied.txt' && event.action === 'removed'));
+});
+
+test('watcher skips worktree copies, backups and build output entirely', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'kx-watcher-ignored-'));
+  await mkdir(join(root, 'docs/worktrees/feature'), { recursive: true });
+  await mkdir(join(root, 'docs/node_modules/pkg'), { recursive: true });
+  await mkdir(join(root, 'docs/build'), { recursive: true });
+  await mkdir(join(root, 'docs/.backups'), { recursive: true });
+  await writeFile(join(root, '.kx.json'), JSON.stringify({
+    project: 'temporary-ignored-test',
+    index: './index.sqlite',
+    sources: [{ type: 'docs', path: './docs', glob: '**/*.txt' }],
+    embedding: { model: 'test', dimensions: 2 },
+  }));
+  const config = loadConfig(root);
+  const events: WatchEvent[] = [];
+  const handle = startWatcher(config, dependencies, {
+    settleMs: 50,
+    onEvent: event => events.push(event),
+  });
+  t.after(async () => {
+    await handle.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  await handle.ready;
+
+  const noise = [
+    join(root, 'docs/worktrees/feature/copia.txt'),
+    join(root, 'docs/node_modules/pkg/dependencia.txt'),
+    join(root, 'docs/build/gerado.txt'),
+    join(root, 'docs/.backups/antigo.txt'),
+  ];
+  await Promise.all(noise.map(file => writeFile(file, 'conteúdo que jamais deve ser indexado pelo watcher')));
+  // The sentinel is written last and awaited, so the noise above had at least
+  // as much time to be picked up had it not been ignored.
+  const sentinel = join(root, 'docs', 'sentinela.txt');
+  await writeFile(sentinel, 'conteúdo legítimo que precisa ser indexado normalmente');
+  await waitFor(() => assert.ok(paths(config).includes('docs/sentinela.txt')));
+
+  const indexedPaths = paths(config);
+  assert.deepEqual(indexedPaths, ['docs/sentinela.txt']);
+  for (const file of noise) {
+    assert.ok(!events.some(event => event.filePath === file), `evento inesperado para ${file}`);
+  }
+});
+
+test('an ignored directory name above the observed root does not disable the source', () => {
+  const insideWorktree = '/repo/worktrees/feature/docs';
+  const isIgnored = createIgnoreMatcher([insideWorktree]);
+
+  assert.equal(isIgnored(join(insideWorktree, 'guia.md')), false);
+  assert.equal(isIgnored(join(insideWorktree, 'worktrees/copia.md')), true);
+  assert.equal(isIgnored(join(insideWorktree, 'node_modules/pkg/index.js')), true);
 });
