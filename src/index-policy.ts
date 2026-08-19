@@ -80,6 +80,13 @@ export const BUILTIN_EXCLUDED_EXTENSIONS: ReadonlySet<string> = new Set([
   '.ipa', '.apk', '.aab', '.dmg', '.pkg',
 ]);
 
+/**
+ * Maior arquivo indexável. Acima disso é dump, log ou artefato gerado:
+ * indexar não ajuda a busca e ler o arquivo inteiro como string pode nem ser
+ * possível (o V8 limita strings a ~512 MB — um dump SQL real estourou isso).
+ */
+export const MAX_INDEXABLE_FILE_BYTES = 10 * 1024 * 1024;
+
 /** Lockfiles: gigantes, gerados, e sem valor semântico para busca. */
 export const BUILTIN_EXCLUDED_FILES: ReadonlySet<string> = new Set([
   'package-lock.json',

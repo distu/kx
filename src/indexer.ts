@@ -4,7 +4,7 @@ import type { KxConfig, SourceConfig } from './config.js';
 import { VectorDatabase, type ChunkInsert } from './database.js';
 import { initEmbedder, embed, embedBatch } from './embedder.js';
 import { chunkMarkdown, chunkCode, chunkConfig } from './chunker.js';
-import { BUILTIN_IGNORE_GLOBS, isDeniedDocumentPath, resolveIndexPath } from './index-policy.js';
+import { BUILTIN_IGNORE_GLOBS, MAX_INDEXABLE_FILE_BYTES, isDeniedDocumentPath, resolveIndexPath } from './index-policy.js';
 
 export interface IndexStats {
   filesProcessed: number;
@@ -119,6 +119,13 @@ async function indexSource(
       }
       const { filePath: safeFilePath, storedPath } = decision;
       const stat = statSync(safeFilePath);
+      if (stat.size > MAX_INDEXABLE_FILE_BYTES) {
+        // Dump, log ou artefato gerado: não é conteúdo de busca e a leitura
+        // inteira como string pode exceder o limite do runtime.
+        db.deleteByPath(storedPath);
+        stats.filesSkipped++;
+        continue;
+      }
       const mtime = Math.floor(stat.mtimeMs);
 
       // No modo incremental, pular se não mudou
@@ -208,9 +215,14 @@ export async function indexSinglePath(
       return stats;
     }
 
+    const stat = statSync(decision.filePath);
+    if (stat.size > MAX_INDEXABLE_FILE_BYTES) {
+      db.deleteByPath(decision.storedPath);
+      stats.filesSkipped = 1;
+      return stats;
+    }
     await dependencies.initEmbedder(config.embedding.model);
     const content = readFileSync(decision.filePath, 'utf-8');
-    const stat = statSync(decision.filePath);
     const mtime = Math.floor(stat.mtimeMs);
     const storedPath = decision.storedPath;
 
