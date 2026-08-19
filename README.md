@@ -1,19 +1,49 @@
 # kx — Knowledge indeX
 
-> Ecossistema RAG/MCP pessoal para desenvolvimento assistido por IA.
-> Busca semântica offline em documentação, código, notas e configurações.
-> Multi-projeto com bases separadas e proteção fail-closed opt-in por UUID.
+> Busca híbrida local (semântica + BM25) para dar contexto de projeto a agentes de IA.
+> MCP server + CLI, 100% offline, multi-projeto com bases isoladas.
+> Funciona com Claude Code, Codex, Cursor e qualquer cliente MCP.
+
+[![ci](https://github.com/distu/kx/actions/workflows/ci.yml/badge.svg)](https://github.com/distu/kx/actions/workflows/ci.yml)
+
+**English summary**: kx indexes your project's docs, code, configs and notes into a
+local SQLite database (sqlite-vec + FTS5) and serves hybrid search — dense
+embeddings fused with BM25 via Reciprocal Rank Fusion, with recency decay and
+content dedup — as an MCP server and an offline CLI. Measured on a synthetic
+stress corpus: exact-identifier recall@10 goes from 3/20 (vector-only) to
+**20/20 (hybrid)** at p50 7 ms per query. No cloud, no API keys, no telemetry.
 
 ---
 
 ## O que é
 
-**kx** é uma ferramenta que indexa toda a documentação, código-fonte, configurações e notas pessoais dos seus projetos em um banco vetorial local (SQLite + sqlite-vec). Funciona como:
+**kx** é uma ferramenta que indexa toda a documentação, código-fonte, configurações e notas pessoais dos seus projetos em um banco local (SQLite + sqlite-vec + FTS5). Funciona como:
 
-1. **MCP Server** — tool nativa no Claude Code que injeta contexto relevante automaticamente
-2. **CLI offline** — busca rápida (<200ms) durante reuniões, sem chamar nenhum LLM
+1. **MCP Server** — tool nativa no Claude Code/Codex/Cursor que injeta contexto relevante automaticamente
+2. **CLI offline** — busca rápida durante reuniões, sem chamar nenhum LLM
 
-O Claude Code consulta o kx automaticamente antes de implementar código, fazer review, ou responder perguntas sobre o projeto. Você consulta via terminal quando precisa de respostas rápidas.
+O agente consulta o kx antes de implementar código, fazer review, ou responder perguntas sobre o projeto. Você consulta via terminal quando precisa de respostas rápidas.
+
+## Por que híbrida
+
+Embeddings densos acham paráfrase e conceito, mas erram exatamente o que um dev
+mais busca num corpus técnico: identificadores, nomes de configuração e
+mensagens de erro. Medição em índice real de 75 mil chunks: `circuit-open`
+presente em 20 chunks e ausente até do top-50 vetorial. A v1.1 funde a via
+vetorial com BM25 (FTS5) por Reciprocal Rank Fusion, aplica impulso de
+recência com meia-vida (docs e decisões novas valem mais) e colapsa duplicatas
+por hash de conteúdo. Detalhes, números e referências:
+[docs/ARQUITETURA-BUSCA.md](docs/ARQUITETURA-BUSCA.md).
+
+| Métrica (stress, pipeline real) | Vetorial pura | Híbrida v1.1 |
+|---|---|---|
+| Recall@10 de termo exato | 3/20 | **20/20** |
+| Latência p50 / p95 | — | 7 ms / 10 ms |
+| Concorrência (8 workers) | — | 142 buscas/s |
+
+Também embutido, sem configuração: `worktrees/`, `node_modules/`, artefatos de
+build (`.class`, `dist/`, `target/`...), binários, mídia e lockfiles nunca
+entram no índice.
 
 ---
 

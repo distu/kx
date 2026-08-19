@@ -25,6 +25,27 @@ export interface IndexingConfig {
   deny?: string[];
 }
 
+/**
+ * Impulso de recência na busca.
+ *
+ * Documentação, decisões de arquitetura e atas de reunião envelhecem: quando
+ * duas fontes cobrem o mesmo assunto, a mais nova costuma ser a vigente. O
+ * decaimento é exponencial por meia-vida sobre o mtime do arquivo e entra na
+ * fusão como multiplicador limitado (1 até 1+weight) — nunca reordena
+ * resultados de relevância muito diferente, só desempata a favor do recente.
+ */
+export interface RecencyConfig {
+  /** Meia-vida em dias: com 90, um doc de 90 dias recebe metade do impulso. */
+  halfLifeDays: number;
+  /** Intensidade do impulso: 0.3 = documento novíssimo ganha até +30%. */
+  weight: number;
+}
+
+export interface SearchTuningConfig {
+  /** `false` desativa; omitido usa o padrão (meia-vida 90 dias, peso 0.3). */
+  recency?: RecencyConfig | false;
+}
+
 export interface McpConfig {
   /**
    * Identificador estável e não secreto do domínio do projeto. Quando
@@ -42,6 +63,7 @@ export interface KxConfig {
   sources: SourceConfig[];
   indexing?: IndexingConfig;
   mcp?: McpConfig;
+  search?: SearchTuningConfig;
   embedding: {
     model: string;
     dimensions: number;
@@ -58,6 +80,7 @@ const DEFAULT_CONFIG: KxConfig = {
   index: '~/.kx/data/default.sqlite',
   projectRoot: process.cwd(),
   sources: [],
+  search: { recency: { halfLifeDays: 90, weight: 0.3 } },
   embedding: {
     model: 'Xenova/all-MiniLM-L6-v2',
     dimensions: 384,
@@ -135,6 +158,7 @@ export function loadConfig(basePath?: string): KxConfig {
 
   config.indexing = normalizeIndexingConfig(config.indexing);
   config.mcp = normalizeMcpConfig(config.mcp);
+  config.search = normalizeSearchConfig(userConfig.search);
 
   return config;
 }
@@ -157,6 +181,30 @@ function normalizeMcpConfig(mcp: unknown): McpConfig | undefined {
     throw new Error('mcp.projectId deve ser um UUID válido e exclusivo do projeto.');
   }
   return { projectId: projectId.trim().toLowerCase() };
+}
+
+function normalizeSearchConfig(search: unknown): SearchTuningConfig {
+  const fallback = DEFAULT_CONFIG.search as SearchTuningConfig;
+  if (search === undefined) return fallback;
+  if (search === null || typeof search !== 'object' || Array.isArray(search)) {
+    throw new Error('search deve ser um objeto (ex.: { "recency": { "halfLifeDays": 90, "weight": 0.3 } }).');
+  }
+
+  const recency = (search as Record<string, unknown>).recency;
+  if (recency === undefined) return fallback;
+  if (recency === false) return { recency: false };
+  if (recency === null || typeof recency !== 'object' || Array.isArray(recency)) {
+    throw new Error('search.recency deve ser false ou um objeto { halfLifeDays, weight }.');
+  }
+
+  const halfLifeDays = (recency as Record<string, unknown>).halfLifeDays;
+  const weight = (recency as Record<string, unknown>).weight;
+  const base = (fallback.recency || { halfLifeDays: 90, weight: 0.3 }) as RecencyConfig;
+  const normalized: RecencyConfig = {
+    halfLifeDays: typeof halfLifeDays === 'number' && halfLifeDays > 0 ? halfLifeDays : base.halfLifeDays,
+    weight: typeof weight === 'number' && weight >= 0 ? weight : base.weight,
+  };
+  return { recency: normalized };
 }
 
 function normalizeIndexingConfig(indexing: IndexingConfig | undefined): IndexingConfig | undefined {

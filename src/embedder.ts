@@ -158,10 +158,31 @@ export async function embed(text: string): Promise<Float32Array> {
   return new Float32Array(output.data as Float64Array);
 }
 
-export async function embedBatch(texts: string[]): Promise<Float32Array[]> {
+/**
+ * Embeddings em lote de verdade.
+ *
+ * Passar um array ao pipeline dispara uma única inferência por lote, com o
+ * runtime paralelizando internamente — em vez de N inferências seriais. O
+ * lote é limitado para conter o pico de memória do padding (sequências do
+ * lote são preenchidas até a mais longa).
+ */
+const DEFAULT_BATCH_SIZE = 8;
+
+export async function embedBatch(texts: string[], batchSize: number = DEFAULT_BATCH_SIZE): Promise<Float32Array[]> {
+  if (texts.length === 0) return [];
+  const active = extractor ?? await loadExtractor(currentModel);
+  scheduleIdleUnload();
+
   const results: Float32Array[] = [];
-  for (const text of texts) {
-    results.push(await embed(text));
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize);
+    const output = await active(batch, { pooling: 'mean', normalize: true });
+    const dims = output.dims;
+    const dim = dims[dims.length - 1];
+    const flat = output.data as Float32Array;
+    for (let j = 0; j < batch.length; j++) {
+      results.push(new Float32Array(flat.slice(j * dim, (j + 1) * dim)));
+    }
   }
   return results;
 }

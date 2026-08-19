@@ -4,7 +4,7 @@ import { isAbsolute, relative, resolve } from 'path';
 import { minimatch } from 'minimatch';
 import type { KxConfig, SourceConfig } from './config.js';
 import { VectorDatabase } from './database.js';
-import { resolveIndexPath } from './index-policy.js';
+import { BUILTIN_EXCLUDED_DIRS, resolveIndexPath } from './index-policy.js';
 import { indexSinglePath, purgeDeniedIndexEntries, removeSinglePath, type IndexStats, type IndexerDependencies } from './indexer.js';
 
 /**
@@ -14,35 +14,6 @@ import { indexSinglePath, purgeDeniedIndexEntries, removeSinglePath, type IndexS
  * new document. Matching happens per path segment relative to the observed
  * root, so a source pointed explicitly inside one of them is still watched.
  */
-const IGNORED_DIRECTORY_NAMES = new Set([
-  'node_modules',
-  '.git',
-  'build',
-  'target',
-  'dist',
-  '.obsidian',
-  '.trash',
-  'worktrees',
-  '.backups',
-  '.gradle',
-  '.idea',
-  '.vscode',
-  'out',
-  'coverage',
-  '.next',
-  '.nuxt',
-  '.venv',
-  'venv',
-  '__pycache__',
-  'Pods',
-  'DerivedData',
-  '.terraform',
-  '.cache',
-  '.pytest_cache',
-  '.mypy_cache',
-  '.turbo',
-  '.parcel-cache',
-]);
 
 const IGNORED_GLOBS = ['.setup/kx/**'];
 
@@ -144,7 +115,7 @@ export function createIgnoreMatcher(roots: string[]): (candidate: string) => boo
 
     const relativePath = toPosixPath(relative(root, absolutePath));
     if (!relativePath) return false;
-    if (relativePath.split('/').some(segment => IGNORED_DIRECTORY_NAMES.has(segment))) return true;
+    if (relativePath.split('/').some(segment => BUILTIN_EXCLUDED_DIRS.has(segment))) return true;
     return IGNORED_GLOBS.some(pattern => minimatch(relativePath, pattern, { dot: true, nonegate: true }));
   };
 }
