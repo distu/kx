@@ -30,3 +30,7 @@ secrets/
 .idea/
 
 .abi-marker
+
+# Logs de runtime e relatorios locais com contexto de maquina/projetos privados
+logs/
+docs/CHECKUP-*.md

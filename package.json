@@ -1,6 +1,6 @@
 {
   "name": "kx",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP server + CLI para busca semântica local em projetos",
   "type": "module",
   "bin": {
@@ -10,7 +10,9 @@
     "build": "tsc",
     "test": "node --import tsx --test tests/**/*.test.ts",
     "start": "tsx src/index.ts",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "stress": "node --import tsx scripts/stress.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",

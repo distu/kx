@@ -5,20 +5,50 @@ export interface Chunk {
 }
 
 /**
- * Estima tokens de forma simples (~4 caracteres por token)
+ * Orçamento seguro de tokens para o modelo de embedding.
+ *
+ * O all-MiniLM-L6-v2 trunca silenciosamente em 512 tokens: tudo que passa
+ * disso é gravado no índice mas nunca entra no vetor — o texto fica
+ * inencontrável pelo próprio conteúdo. Medição real neste projeto mostrou
+ * 51% dos chunks de código truncados quando o chunking confiava no limite
+ * nominal. O orçamento fica abaixo do limite com margem para a variação da
+ * estimativa de tokens.
+ */
+export const EMBED_SAFE_TOKENS = 440;
+
+/**
+ * Estima tokens a partir de caracteres.
+ *
+ * A heurística clássica de ~4 caracteres por token vale para inglês corrente,
+ * mas o tokenizer do MiniLM produz ~2,9 caracteres por token em português e
+ * menos ainda em código (identificadores compostos viram vários subtokens).
+ * Medição com o tokenizer real: 575 caracteres -> 201 tokens. O divisor 3 é
+ * conservador de propósito: superestimar tokens gera chunks um pouco menores;
+ * subestimar gera truncamento silencioso.
  */
 function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  return Math.ceil(text.length / 3);
+}
+
+/** Caracteres equivalentes ao overlap configurado em tokens. */
+function overlapChars(overlapTokens: number): number {
+  return overlapTokens * 3;
+}
+
+function clampToEmbedBudget(maxTokens: number): number {
+  return Math.min(maxTokens, EMBED_SAFE_TOKENS);
 }
 
 /**
- * Chunking para Markdown: divide por headers, depois por tamanho
+ * Chunking para Markdown: divide por headers, depois por tamanho.
  */
 export function chunkMarkdown(
   content: string,
   maxTokens: number = 512,
   overlap: number = 50
 ): Chunk[] {
+  const budget = clampToEmbedBudget(maxTokens);
+
   // Remover wikilinks para indexação, preservando o texto
   const cleaned = content.replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (_match, target, _pipe, alias) => {
     return alias || target;
@@ -29,14 +59,14 @@ export function chunkMarkdown(
   let index = 0;
 
   for (const section of sections) {
-    if (estimateTokens(section.content) <= maxTokens) {
+    if (estimateTokens(section.content) <= budget) {
       chunks.push({
         content: section.content.trim(),
         index: index++,
         metadata: { header: section.header },
       });
     } else {
-      const subChunks = recursiveSplit(section.content, maxTokens, overlap);
+      const subChunks = recursiveSplit(section.content, budget, overlap);
       for (const sub of subChunks) {
         chunks.push({
           content: sub.trim(),
@@ -51,18 +81,29 @@ export function chunkMarkdown(
 }
 
 /**
- * Chunking para código: divide por funções/métodos/classes
+ * Chunking para código: divide por funções/métodos/classes.
  */
 export function chunkCode(
   content: string,
   maxTokens: number = 1024,
   filePath: string = ''
 ): Chunk[] {
+  const budget = clampToEmbedBudget(maxTokens);
   const isJava = filePath.endsWith('.java');
   const isTS = filePath.endsWith('.ts') || filePath.endsWith('.tsx');
 
   const chunks: Chunk[] = [];
   let index = 0;
+
+  const pushBounded = (text: string, metadata: Record<string, unknown>) => {
+    if (estimateTokens(text) <= budget) {
+      chunks.push({ content: text.trim(), index: index++, metadata });
+      return;
+    }
+    for (const sub of recursiveSplit(text, budget, 0)) {
+      chunks.push({ content: sub.trim(), index: index++, metadata });
+    }
+  };
 
   if (isJava) {
     // Extrair package e imports como contexto
@@ -88,27 +129,10 @@ export function chunkCode(
     const methods = splitByPattern(body, methodPattern);
 
     if (methods.length <= 1) {
-      // Arquivo pequeno ou sem métodos claros, tratar como chunk único
-      if (estimateTokens(content) <= maxTokens) {
-        chunks.push({ content: content.trim(), index: index++, metadata: { language: 'java' } });
-      } else {
-        const subs = recursiveSplit(content, maxTokens, 0);
-        for (const sub of subs) {
-          chunks.push({ content: sub.trim(), index: index++, metadata: { language: 'java' } });
-        }
-      }
+      pushBounded(content, { language: 'java' });
     } else {
       for (const method of methods) {
-        const fullChunk = header + '\n\n' + method;
-        if (estimateTokens(fullChunk) <= maxTokens) {
-          chunks.push({ content: fullChunk.trim(), index: index++, metadata: { language: 'java' } });
-        } else {
-          // Método muito grande, dividir
-          const subs = recursiveSplit(fullChunk, maxTokens, 0);
-          for (const sub of subs) {
-            chunks.push({ content: sub.trim(), index: index++, metadata: { language: 'java' } });
-          }
-        }
+        pushBounded(header + '\n\n' + method, { language: 'java' });
       }
     }
   } else if (isTS) {
@@ -117,50 +141,29 @@ export function chunkCode(
     const parts = splitByPattern(content, tsPattern);
 
     if (parts.length <= 1) {
-      if (estimateTokens(content) <= maxTokens) {
-        chunks.push({ content: content.trim(), index: index++, metadata: { language: 'typescript' } });
-      } else {
-        const subs = recursiveSplit(content, maxTokens, 0);
-        for (const sub of subs) {
-          chunks.push({ content: sub.trim(), index: index++, metadata: { language: 'typescript' } });
-        }
-      }
+      pushBounded(content, { language: 'typescript' });
     } else {
       for (const part of parts) {
-        if (estimateTokens(part) <= maxTokens) {
-          chunks.push({ content: part.trim(), index: index++, metadata: { language: 'typescript' } });
-        } else {
-          const subs = recursiveSplit(part, maxTokens, 0);
-          for (const sub of subs) {
-            chunks.push({ content: sub.trim(), index: index++, metadata: { language: 'typescript' } });
-          }
-        }
+        pushBounded(part, { language: 'typescript' });
       }
     }
   } else {
-    // Fallback genérico
-    if (estimateTokens(content) <= maxTokens) {
-      chunks.push({ content: content.trim(), index: index++, metadata: {} });
-    } else {
-      const subs = recursiveSplit(content, maxTokens, 0);
-      for (const sub of subs) {
-        chunks.push({ content: sub.trim(), index: index++, metadata: {} });
-      }
-    }
+    pushBounded(content, {});
   }
 
   return chunks.filter(c => c.content.length > 20);
 }
 
 /**
- * Chunking para configs: arquivo inteiro ou por seções top-level
+ * Chunking para configs: arquivo inteiro ou por seções top-level.
  */
 export function chunkConfig(content: string, maxTokens: number = 256): Chunk[] {
-  if (estimateTokens(content) <= maxTokens) {
+  const budget = clampToEmbedBudget(maxTokens);
+  if (estimateTokens(content) <= budget) {
     return [{ content: content.trim(), index: 0, metadata: { type: 'config' } }];
   }
 
-  const subs = recursiveSplit(content, maxTokens, 0);
+  const subs = recursiveSplit(content, budget, 0);
   return subs.map((sub, i) => ({
     content: sub.trim(),
     index: i,
@@ -200,43 +203,75 @@ function splitByHeaders(text: string): Section[] {
   return sections;
 }
 
-function recursiveSplit(text: string, maxTokens: number, overlap: number): string[] {
+const SPLIT_SEPARATORS = ['\n\n', '\n', '. ', ' '] as const;
+
+/**
+ * Divisão recursiva de verdade.
+ *
+ * A versão anterior dividia pelo primeiro separador presente no texto e
+ * retornava direto, sem verificar se as partes resultantes ainda excediam o
+ * limite — um parágrafo sem quebras internas passava inteiro, e o índice
+ * chegou a acumular chunks de ~1 MB. Aqui, toda parte que continua acima do
+ * orçamento desce para o próximo separador da escada, com corte por
+ * caractere como último recurso. Invariante garantida: nenhum chunk emitido
+ * excede `maxTokens` estimados.
+ */
+export function recursiveSplit(
+  text: string,
+  maxTokens: number,
+  overlap: number,
+  separatorIndex: number = 0,
+): string[] {
   if (estimateTokens(text) <= maxTokens) {
     return [text];
   }
 
-  const separators = ['\n\n', '\n', '. ', ' '];
+  // Escada esgotada: corta por caractere. É o fallback para blobs sem
+  // nenhuma estrutura (linhas gigantes, base64, minificados que escaparam).
+  if (separatorIndex >= SPLIT_SEPARATORS.length) {
+    const chunkSize = maxTokens * 3;
+    const out: string[] = [];
+    for (let i = 0; i < text.length; i += chunkSize) {
+      out.push(text.slice(i, i + chunkSize));
+    }
+    return out;
+  }
+
+  const sep = SPLIT_SEPARATORS[separatorIndex];
+  if (!text.includes(sep)) {
+    return recursiveSplit(text, maxTokens, overlap, separatorIndex + 1);
+  }
+
+  const parts = text.split(sep);
   const chunks: string[] = [];
-  let remaining = text;
+  let current = '';
 
-  for (const sep of separators) {
-    if (remaining.includes(sep)) {
-      const parts = remaining.split(sep);
-      let current = '';
+  const flush = () => {
+    if (current) chunks.push(current);
+    current = '';
+  };
 
-      for (const part of parts) {
-        const candidate = current ? current + sep + part : part;
-        if (estimateTokens(candidate) > maxTokens && current) {
-          chunks.push(current);
-          // Overlap: manter últimos N caracteres
-          const overlapChars = overlap * 4;
-          current = overlapChars > 0 ? current.slice(-overlapChars) + sep + part : part;
-        } else {
-          current = candidate;
-        }
-      }
+  for (const part of parts) {
+    // Uma parte sozinha acima do limite desce um nível na escada.
+    if (estimateTokens(part) > maxTokens) {
+      flush();
+      chunks.push(...recursiveSplit(part, maxTokens, overlap, separatorIndex + 1));
+      continue;
+    }
 
-      if (current) chunks.push(current);
-      return chunks;
+    const candidate = current ? current + sep + part : part;
+    if (estimateTokens(candidate) > maxTokens) {
+      flush();
+      const tail = overlap > 0 ? chunks[chunks.length - 1]?.slice(-overlapChars(overlap)) : '';
+      current = tail ? tail + sep + part : part;
+      // O overlap não pode reintroduzir estouro.
+      if (estimateTokens(current) > maxTokens) current = part;
+    } else {
+      current = candidate;
     }
   }
 
-  // Fallback: cortar por caractere
-  const chunkSize = maxTokens * 4;
-  for (let i = 0; i < text.length; i += chunkSize) {
-    chunks.push(text.slice(i, i + chunkSize));
-  }
-
+  flush();
   return chunks;
 }
 

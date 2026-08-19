@@ -2,18 +2,19 @@ import { Command } from 'commander';
 import type { KxConfig } from './config.js';
 import { search, getStatus } from './searcher.js';
 import { indexProject } from './indexer.js';
+import { VectorDatabase } from './database.js';
 
 export function createCli(config: KxConfig): Command {
   const program = new Command();
 
   program
     .name('kx')
-    .description('Busca semântica no projeto — MCP server + CLI offline')
-    .version('1.0.0');
+    .description('Busca híbrida (semântica + lexical) no projeto — MCP server + CLI offline')
+    .version('1.1.0');
 
   program
     .command('search <query>')
-    .description('Busca semântica na documentação e código')
+    .description('Busca híbrida na documentação e código (vetorial + BM25, fusão RRF)')
     .option('-t, --top <number>', 'Número de resultados', '10')
     .option('--type <type>', 'Filtrar: docs, code, config, vault, all', 'all')
     .option('--json', 'Saída em JSON')
@@ -32,10 +33,9 @@ export function createCli(config: KxConfig): Command {
 
       for (let i = 0; i < results.length; i++) {
         const r = results[i];
-        const score = (1 - r.distance).toFixed(3);
         const preview = r.content.slice(0, 300).replace(/\n/g, '\n  ');
 
-        console.log(`\n[${score}] ${r.path} [${r.source_type}]`);
+        console.log(`\n[${r.score.toFixed(4)}] ${r.path} [${r.source_type}|${r.matchedBy}]`);
         console.log(`  ${preview}${r.content.length > 300 ? '...' : ''}`);
 
         if (i < results.length - 1) {
@@ -60,9 +60,9 @@ export function createCli(config: KxConfig): Command {
       console.log(`\nIndexação concluída em ${elapsed}s:`);
       console.log(`  Arquivos processados: ${stats.filesProcessed}`);
       console.log(`  Chunks criados: ${stats.chunksCreated}`);
-      console.log(`  Arquivos ignorados (sem mudanças): ${stats.filesSkipped}`);
+      console.log(`  Arquivos ignorados (sem mudanças ou excluídos): ${stats.filesSkipped}`);
       console.log(`  Paths bloqueados removidos: ${stats.filesPurged}`);
-      console.log(`  Bloqueios aplicados no scan: ${stats.blocked.length}`);
+      console.log(`  Bloqueios da denylist no scan: ${stats.blocked.length}`);
 
       if (stats.errors.length > 0) {
         console.log(`  Erros: ${stats.errors.length}`);
@@ -91,6 +91,21 @@ export function createCli(config: KxConfig): Command {
         }
       } catch {
         console.log('Índice não encontrado. Execute "kx index" primeiro.');
+      }
+    });
+
+  program
+    .command('vacuum')
+    .description('Compacta o índice e devolve espaço livre ao sistema de arquivos')
+    .action(() => {
+      const db = new VectorDatabase(config.index, config.embedding.dimensions);
+      try {
+        console.log(`Compactando ${config.index}...`);
+        const { beforeBytes, afterBytes, freedBytes } = db.vacuum();
+        const mb = (bytes: number) => (bytes / 1048576).toFixed(1);
+        console.log(`Antes: ${mb(beforeBytes)} MB | Depois: ${mb(afterBytes)} MB | Liberado: ${mb(freedBytes)} MB`);
+      } finally {
+        db.close();
       }
     });
 

@@ -1,10 +1,10 @@
 import { readFileSync, statSync } from 'fs';
 import { glob } from 'glob';
 import type { KxConfig, SourceConfig } from './config.js';
-import { VectorDatabase } from './database.js';
-import { initEmbedder, embed } from './embedder.js';
+import { VectorDatabase, type ChunkInsert } from './database.js';
+import { initEmbedder, embed, embedBatch } from './embedder.js';
 import { chunkMarkdown, chunkCode, chunkConfig } from './chunker.js';
-import { isDeniedDocumentPath, resolveIndexPath } from './index-policy.js';
+import { BUILTIN_IGNORE_GLOBS, isDeniedDocumentPath, resolveIndexPath } from './index-policy.js';
 
 export interface IndexStats {
   filesProcessed: number;
@@ -18,9 +18,24 @@ export interface IndexStats {
 export interface IndexerDependencies {
   initEmbedder: (model: string) => Promise<void>;
   embed: (text: string) => Promise<Float32Array>;
+  /** Opcional: lote real. Sem ele, o indexador serializa via `embed`. */
+  embedBatch?: (texts: string[]) => Promise<Float32Array[]>;
 }
 
-const defaultDependencies: IndexerDependencies = { initEmbedder, embed };
+const defaultDependencies: IndexerDependencies = { initEmbedder, embed, embedBatch };
+
+/**
+ * Resolve a função de lote: usa a nativa quando o chamador injetou uma, e
+ * serializa sobre `embed` caso contrário — testes injetam apenas `embed`.
+ */
+function embedManyWith(dependencies: IndexerDependencies): (texts: string[]) => Promise<Float32Array[]> {
+  if (dependencies.embedBatch) return dependencies.embedBatch;
+  return async (texts: string[]) => {
+    const results: Float32Array[] = [];
+    for (const text of texts) results.push(await dependencies.embed(text));
+    return results;
+  };
+}
 
 export async function indexProject(
   config: KxConfig,
@@ -76,10 +91,14 @@ async function indexSource(
     errors: [],
   };
 
+  const embedMany = embedManyWith(dependencies);
+
+  // As exclusões embutidas entram no próprio scan: não descer em node_modules
+  // ou worktrees economiza a listagem de dezenas de milhares de entradas.
   const files = await glob(source.glob, {
     cwd: source.path,
     absolute: true,
-    ignore: source.exclude || [],
+    ignore: [...(source.exclude || []), ...BUILTIN_IGNORE_GLOBS],
     nodir: true,
   });
 
@@ -93,7 +112,9 @@ async function indexSource(
       if (!decision.allowed) {
         db.deleteByPath(decision.storedPath);
         stats.filesSkipped++;
-        stats.blocked.push(decision.reason);
+        // Bloqueio embutido (artefato de build, binário) é silencioso: só a
+        // denylist do usuário merece aparecer no relatório de bloqueios.
+        if (!decision.builtin) stats.blocked.push(decision.reason);
         continue;
       }
       const { filePath: safeFilePath, storedPath } = decision;
@@ -111,11 +132,9 @@ async function indexSource(
 
       const content = readFileSync(safeFilePath, 'utf-8');
 
-      // Remover antes de tratar conteúdo vazio também elimina chunks antigos.
-      db.deleteByPath(storedPath);
-
-      // Pular arquivos vazios ou binários
+      // Pular arquivos vazios ou binários — removendo chunks antigos.
       if (!content || content.length < 10) {
+        db.deleteByPath(storedPath);
         stats.filesSkipped++;
         continue;
       }
@@ -123,21 +142,10 @@ async function indexSource(
       // Chunking baseado no tipo
       const chunks = chunkByType(content, source.type, safeFilePath, config);
 
-      // Indexar cada chunk
-      for (const chunk of chunks) {
-        const embedding = await dependencies.embed(chunk.content);
-        db.insertDocument(
-          storedPath,
-          chunk.index,
-          chunk.content,
-          source.type,
-          mtime,
-          embedding,
-          chunk.metadata
-        );
-
-        stats.chunksCreated++;
-      }
+      // Embeddings em lote e escrita numa transação única por arquivo.
+      const embeddings = await embedMany(chunks.map(chunk => chunk.content));
+      db.replaceDocument(storedPath, source.type, mtime, chunks as ChunkInsert[], embeddings);
+      stats.chunksCreated += chunks.length;
 
       stats.filesProcessed++;
 
@@ -196,7 +204,7 @@ export async function indexSinglePath(
     if (!decision.allowed) {
       db.deleteByPath(decision.storedPath);
       stats.filesSkipped = 1;
-      stats.blocked.push(decision.reason);
+      if (!decision.builtin) stats.blocked.push(decision.reason);
       return stats;
     }
 
@@ -206,19 +214,14 @@ export async function indexSinglePath(
     const mtime = Math.floor(stat.mtimeMs);
     const storedPath = decision.storedPath;
 
-    db.deleteByPath(storedPath);
-
     // O watcher conhece a fonte que aceitou o evento. Preservar esse tipo
     // evita que o chunking dependa de uma lista de extensões incompleta.
     const type = sourceType ?? inferSourceType(targetPath);
 
     const chunks = chunkByType(content, type, decision.filePath, config);
-
-    for (const chunk of chunks) {
-      const embedding = await dependencies.embed(chunk.content);
-      db.insertDocument(storedPath, chunk.index, chunk.content, type, mtime, embedding, chunk.metadata);
-      stats.chunksCreated++;
-    }
+    const embeddings = await embedManyWith(dependencies)(chunks.map(chunk => chunk.content));
+    db.replaceDocument(storedPath, type, mtime, chunks as ChunkInsert[], embeddings);
+    stats.chunksCreated = chunks.length;
 
     stats.filesProcessed = 1;
   } catch (error) {

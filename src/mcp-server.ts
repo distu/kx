@@ -111,7 +111,7 @@ export function createMcpServer(config: KxConfig, hooks: McpServerHooks = {}): S
   );
 
   const server = new Server(
-    { name: 'kx', version: '1.0.0' },
+    { name: 'kx', version: '1.1.0' },
     { capabilities: { tools: {} } }
   );
 
@@ -121,7 +121,7 @@ export function createMcpServer(config: KxConfig, hooks: McpServerHooks = {}): S
     tools: [
       {
         name: 'search',
-        description: 'Busca semântica na documentação, código e notas do projeto. Use para encontrar padrões, decisões de arquitetura, endpoints e configurações que tenham sido explicitamente indexados. REGRA: ao usar resultados desta busca para gerar texto em português, SEMPRE aplicar acentuação correta (ã, é, í, ó, ú, ç, à, â, ê, ô, õ). Os chunks indexados podem conter texto sem acentos - corrija ao reproduzir.',
+        description: 'Busca híbrida (semântica + lexical BM25, fusão RRF com recência) na documentação, código e notas do projeto. Encontra tanto conceitos parafraseados quanto identificadores exatos (nomes de configuração, mensagens de erro, classes). Use para encontrar padrões, decisões de arquitetura, endpoints e configurações que tenham sido explicitamente indexados. REGRA: ao usar resultados desta busca para gerar texto em português, SEMPRE aplicar acentuação correta (ã, é, í, ó, ú, ç, à, â, ê, ô, õ). Os chunks indexados podem conter texto sem acentos - corrija ao reproduzir.',
         inputSchema: {
           type: 'object' as const,
           properties: {
@@ -269,8 +269,7 @@ export function createMcpServer(config: KxConfig, hooks: McpServerHooks = {}): S
         const results = await search(config, query, top, type);
 
         const formatted = results.map((r, i) => {
-          const score = (1 - r.distance).toFixed(3);
-          return `[${i + 1}] (${score}) ${r.path} [${r.source_type}]\n${r.content.slice(0, 500)}${r.content.length > 500 ? '...' : ''}`;
+          return `[${i + 1}] (${r.score.toFixed(4)}|${r.matchedBy}) ${r.path} [${r.source_type}]\n${r.content.slice(0, 500)}${r.content.length > 500 ? '...' : ''}`;
         }).join('\n\n---\n\n');
 
         const accentReminder = '\n\n---\n\n[REGRA] Texto em português DEVE ter acentuação correta (ã, é, í, ó, ú, ç, à, â, ê, ô, õ). Se os resultados acima contêm texto sem acentos, corrija ao reproduzir em artefatos.';
