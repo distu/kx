@@ -89,3 +89,21 @@ test('fonte apontada explicitamente para dentro de um diretório excluído conti
   assert.equal(stats.filesProcessed, 1);
   assert.ok(indexedPaths(config).some(p => p.endsWith('notas.md')));
 });
+
+test('arquivo acima do teto de tamanho é pulado sem erro', async (t) => {
+  const { root, config } = await makeProject(
+    { sources: [{ type: 'docs', path: '.', glob: '**/*.sql' }] },
+    { 'schema/pequeno.sql': 'CREATE TABLE exemplo (id INTEGER PRIMARY KEY, nome TEXT);' },
+  );
+  t.after(async () => rm(root, { recursive: true, force: true }));
+
+  // 11 MB de dump simulado: acima do teto de 10 MB.
+  const gigante = 'INSERT INTO exemplo VALUES (1, "linha");\n'.repeat(280_000);
+  await mkdir(join(root, 'schema'), { recursive: true });
+  await writeFile(join(root, 'schema', 'dump.sql'), gigante);
+
+  const stats = await indexProject(config, 'full', dependencies);
+  assert.equal(stats.errors.length, 0, 'dump gigante não pode virar erro');
+  assert.equal(stats.filesProcessed, 1, 'só o arquivo pequeno é indexado');
+  assert.ok(!indexedPaths(config).some(p => p.endsWith('dump.sql')));
+});
