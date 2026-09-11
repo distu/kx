@@ -20,6 +20,17 @@ if (command === 'daemon') {
     console.error('Erro ao iniciar MCP server:', error);
     process.exit(1);
   });
+} else if (command === 'artifact') {
+  // Registro de artefatos publicados. CLI propria e sem SQLite no caminho critico: e chamada
+  // por hook a cada publicacao, entao precisa subir rapido e nao depender de binario nativo.
+  const { loadConfig } = await import('./config.js');
+  const { createArtifactCli } = await import('./artifacts-cli.js');
+  const config = loadConfig();
+  const cli = createArtifactCli(config);
+  cli.parseAsync([process.argv[0], process.argv[1], ...args.slice(1)]).catch((error) => {
+    console.error('Erro:', error.message);
+    process.exit(1);
+  });
 } else if (command === 'watch') {
   const { loadConfig } = await import('./config.js');
   const { startWatcher } = await import('./watcher.js');

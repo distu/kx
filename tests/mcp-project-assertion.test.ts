@@ -77,6 +77,9 @@ test('protected MCP tools require the active project UUID in their schemas', asy
     'megabrain_update',
     'megabrain_status',
     'megabrain_get',
+    'megabrain_artifact_add',
+    'megabrain_artifacts',
+    'megabrain_artifact_link',
   ];
   assert.deepEqual(listed.tools.map(tool => tool.name), expectedTools);
   for (const tool of listed.tools) {

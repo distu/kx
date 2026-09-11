@@ -10,6 +10,7 @@ import { search, getStatus } from './searcher.js';
 import { VectorDatabase } from './database.js';
 import { indexProject, indexSinglePath, purgeDeniedIndexEntries, type IndexerDependencies } from './indexer.js';
 import { addActivity, updateActivity, statusReport, getActivity } from './megabrain.js';
+import { registerArtifact, linkArtifact, listArtifacts } from './artifacts.js';
 import { createLifecycleGuard } from './mcp-lifecycle.js';
 import { unloadIfIdle } from './embedder.js';
 
@@ -111,7 +112,7 @@ export function createMcpServer(config: KxConfig, hooks: McpServerHooks = {}): S
   );
 
   const server = new Server(
-    { name: 'kx', version: '1.1.0' },
+    { name: 'kx', version: '1.2.0' },
     { capabilities: { tools: {} } }
   );
 
@@ -246,6 +247,54 @@ export function createMcpServer(config: KxConfig, hooks: McpServerHooks = {}): S
           required: required(['slug']),
         },
       },
+      {
+        name: 'megabrain_artifact_add',
+        description: 'KX artifact registry: registra (ou versiona) um artefato web publicado — a pagina que abre em claude.ai/code/artifact/... — vinculando-o a atividade em que o trabalho aconteceu. Normalmente o hook PostToolUse faz isso sozinho; use esta tool quando o artefato veio de outro agente (Codex), quando o registro automatico nao rodou, ou para corrigir titulo/descricao. Escopo do projeto atual.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
+            url: { type: 'string', description: 'URL do artefato publicado' },
+            titulo: { type: 'string', description: 'Titulo curto do artefato' },
+            descricao: { type: 'string', description: 'Do que o artefato trata (uma frase)' },
+            arquivo: { type: 'string', description: 'Arquivo fonte que originou o artefato' },
+            atividade: { type: 'string', description: 'Slug OU ID numerico da atividade. OPCIONAL: se omitido, resolve pela sessao Claude Code ativa.' },
+            agente: { type: 'string', description: 'Quem publicou: claude-code, codex, ... (padrao: claude-code)' },
+            label: { type: 'string', description: 'Rotulo desta publicacao (ex: "ajuste de acentos")' },
+            sessao: { type: 'string', description: 'ID da sessao Claude Code. OPCIONAL: auto-detectado.' },
+          },
+          required: required(['url']),
+        },
+      },
+      {
+        name: 'megabrain_artifacts',
+        description: 'KX artifact registry: lista os artefatos web publicados no projeto (link, versao atual, do que trata e a atividade de origem), mais recentes primeiro. Use quando o usuario perguntar "qual era o link daquele artefato/pagina/painel que publicamos", pedir os artefatos de uma atividade, ou quiser o historico de publicacoes. Escopo do projeto atual.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
+            atividade: { type: 'string', description: 'Filtrar por atividade (slug ou ID numerico)' },
+            limit: { type: 'number', description: 'Quantos artefatos (padrao 30)', default: 30 },
+          },
+          required: required(),
+        },
+      },
+      {
+        name: 'megabrain_artifact_link',
+        description: 'KX artifact registry: vincula um artefato ja registrado a uma atividade — usado quando o artefato caiu em "Sem atividade vinculada" (a sessao nao pertencia a nenhuma atividade no momento da publicacao) ou quando ele pertence a outra atividade. Escopo do projeto atual.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            expected_project_id: PROJECT_ASSERTION_PROPERTY,
+            expected_project_root: PROJECT_ROOT_ASSERTION_PROPERTY,
+            url: { type: 'string', description: 'URL do artefato ja registrado' },
+            atividade: { type: 'string', description: 'Atividade de destino (slug ou ID numerico)' },
+          },
+          required: required(['url', 'atividade']),
+        },
+      },
     ],
     };
   });
@@ -328,6 +377,37 @@ export function createMcpServer(config: KxConfig, hooks: McpServerHooks = {}): S
       case 'megabrain_get': {
         const text = getActivity(config, (args as { slug: string }).slug);
         return { content: [{ type: 'text', text }] };
+      }
+
+      case 'megabrain_artifact_add': {
+        const r = registerArtifact(config, args as any);
+        try { await indexSinglePath(config, r.indexPath); } catch { /* indexacao best-effort */ }
+        const vinculo = r.record.atividade
+          ? `atividade "${r.atividadeTitulo || r.record.atividade}"`
+          : 'SEM atividade vinculada (use megabrain_artifact_link)';
+        return {
+          content: [{
+            type: 'text',
+            text: `${r.novo ? 'Artefato registrado' : 'Artefato versionado'}: ${r.record.titulo} (v${r.record.versao})\n${r.record.url}\n${vinculo}\nIndice: ${r.indexPath}`,
+          }],
+        };
+      }
+
+      case 'megabrain_artifacts': {
+        const a = args as { atividade?: string; limit?: number };
+        return { content: [{ type: 'text', text: listArtifacts(config, { atividade: a.atividade, limit: a.limit }) }] };
+      }
+
+      case 'megabrain_artifact_link': {
+        const a = args as { url: string; atividade: string };
+        const r = linkArtifact(config, a.url, a.atividade);
+        try { await indexSinglePath(config, r.indexPath); } catch { /* indexacao best-effort */ }
+        return {
+          content: [{
+            type: 'text',
+            text: `Artefato "${r.record.titulo}" vinculado a ${r.atividadeTitulo || r.record.atividade}.`,
+          }],
+        };
       }
 
       default:

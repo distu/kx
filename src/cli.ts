@@ -10,7 +10,7 @@ export function createCli(config: KxConfig): Command {
   program
     .name('kx')
     .description('Busca híbrida (semântica + lexical) no projeto — MCP server + CLI offline')
-    .version('1.1.0');
+    .version('1.2.0');
 
   program
     .command('search <query>')

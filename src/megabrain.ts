@@ -17,7 +17,7 @@ export interface UpdateArgs { slug: string; tipo: UpdateKind; texto?: string; se
 const SQUADS = ['portal-backoffice', 'infraestrutura', 'integracoes', 'pdv-core', 'transversal'];
 
 // ---- isolamento ----
-function vaultRoot(config: KxConfig): string {
+export function vaultRoot(config: KxConfig): string {
   const root = resolve(config.projectRoot);
   if (root === resolve(homedir())) {
     throw new Error('KX activity manager indisponivel: config global (~). Rode dentro de um projeto com .kx.json.');
@@ -29,17 +29,17 @@ function vaultRoot(config: KxConfig): string {
   }
   return resolve(root, '.vault');
 }
-function ensureVaultDir(config: KxConfig, sub: string): string {
+export function ensureVaultDir(config: KxConfig, sub: string): string {
   const d = assertInside(vaultRoot(config), resolve(vaultRoot(config), sub));
   if (!existsSync(d)) mkdirSync(d, { recursive: true });
   return d;
 }
-function assertInside(base: string, p: string): string {
+export function assertInside(base: string, p: string): string {
   const b = resolve(base); const r = resolve(p);
   if (r !== b && !r.startsWith(b + sep)) throw new Error(`path fora do vault (isolamento): ${p}`);
   return r;
 }
-function mbDir(config: KxConfig): string {
+export function mbDir(config: KxConfig): string {
   // NAO cria (leitura). Para escrita, usar ensureVaultDir(config, 'megabrain').
   return assertInside(vaultRoot(config), resolve(vaultRoot(config), 'megabrain'));
 }
@@ -60,8 +60,8 @@ function ensureMoc(config: KxConfig): string {
 }
 
 // ---- helpers ----
-function todayISO(): string { return new Date().toISOString().slice(0, 10); }
-function slugify(s: string): string {
+export function todayISO(): string { return new Date().toISOString().slice(0, 10); }
+export function slugify(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
 }
@@ -82,7 +82,7 @@ function claudeProjectsDir(config: KxConfig): string {
 // desta tool no proprio transcript, entao seu arquivo e o ultimo escrito.
 // Best-effort: com varias sessoes paralelas no MESMO projeto pode pegar a vizinha; por isso o
 // parametro explicito `sessao` sempre vence. Nunca lanca — na duvida retorna undefined.
-function detectClaudeSession(config: KxConfig): string | undefined {
+export function detectClaudeSession(config: KxConfig): string | undefined {
   try {
     const dir = claudeProjectsDir(config);
     if (!existsSync(dir)) return undefined;
@@ -97,8 +97,8 @@ function detectClaudeSession(config: KxConfig): string | undefined {
     return undefined; // deteccao e conveniencia, nunca quebra o add/update
   }
 }
-interface Parsed { fm: Record<string, string>; body: string; }
-function parse(md: string): Parsed {
+export interface Parsed { fm: Record<string, string>; body: string; }
+export function parseNote(md: string): Parsed {
   const m = md.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!m) return { fm: {}, body: md };
   const fm: Record<string, string> = {};
@@ -117,7 +117,7 @@ function nextId(dir: string): number {
   let max = 0;
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.md')) continue;
-    const { fm } = parse(readFileSync(resolve(dir, f), 'utf-8'));
+    const { fm } = parseNote(readFileSync(resolve(dir, f), 'utf-8'));
     const n = parseInt(fm.id || '', 10);
     if (!Number.isNaN(n) && n > max) max = n;
   }
@@ -131,7 +131,7 @@ function resolveRef(config: KxConfig, ref: string): string {
     if (existsSync(dir)) {
       for (const f of readdirSync(dir)) {
         if (!f.endsWith('.md')) continue;
-        const { fm } = parse(readFileSync(resolve(dir, f), 'utf-8'));
+        const { fm } = parseNote(readFileSync(resolve(dir, f), 'utf-8'));
         if (fm.id === trimmed) return f.replace(/\.md$/, '');
       }
     }
@@ -229,7 +229,7 @@ export function updateActivity(config: KxConfig, u: UpdateArgs): { path: string;
   const file = assertInside(vaultRoot(config), resolve(mbDir(config), `${resolvedSlug}.md`));
   if (!existsSync(file)) throw new Error(`atividade nao encontrada: ${u.slug}`);
   let md = readFileSync(file, 'utf-8');
-  const { fm } = parse(md);
+  const { fm } = parseNote(md);
   const today = todayISO();
 
   // registrar sessao (explicita vence; senao a ativa) se ainda nao estiver na lista
@@ -263,7 +263,7 @@ export function updateActivity(config: KxConfig, u: UpdateArgs): { path: string;
   md = md.replace(/^updated:.*$/m, `updated: ${today}`);
   writeFileSync(file, md, 'utf-8');
 
-  const p2 = parse(md);
+  const p2 = parseNote(md);
   if (u.tipo === 'conclusao') mocSync(config, resolvedSlug, p2.fm.titulo || resolvedSlug, normSquad(p2.fm.squad), 'concluida');
   return { path: file, status: p2.fm.status || 'em-andamento', slug: resolvedSlug };
 }
@@ -315,7 +315,7 @@ function readAll(config: KxConfig): ActRow[] {
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.md')) continue;
     const md = readFileSync(resolve(dir, f), 'utf-8');
-    const { fm, body } = parse(md);
+    const { fm, body } = parseNote(md);
     // ultima entrada do log (onde paramos) — SO a secao Log de Progresso, ate o proximo ##
     const logMatch = body.match(/## Log de Progresso\n([\s\S]*?)(?:\n## |$)/);
     const logSection = logMatch ? logMatch[1] : '';
@@ -376,7 +376,7 @@ export function listActivitySessions(config: KxConfig): ActivitySessions[] {
   if (!existsSync(dir)) return out;
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.md')) continue;
-    const { fm } = parse(readFileSync(resolve(dir, f), 'utf-8'));
+    const { fm } = parseNote(readFileSync(resolve(dir, f), 'utf-8'));
     const sessions = [...(fm.sessoes_claude || '[]').matchAll(/"([^"]+)"/g)].map(m => m[1]);
     out.push({
       slug: f.replace(/\.md$/, ''), id: parseInt(fm.id || '', 10) || 0,
