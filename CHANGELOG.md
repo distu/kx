@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.0 — 2026-09-11
+
+### Registro de artefatos publicados
+
+- **Novo módulo `artifacts`**: todo artefato web publicado por um agente (Claude Code, Codex)
+  passa a ser registrado no `.vault/` do projeto, com link, versão, do que trata e a
+  atividade em que nasceu. Índice legível em `.vault/ARTEFATOS.md` (entra na busca);
+  fonte de verdade estruturada em `.vault/artefatos/artefatos.json`.
+- **Vínculo por sessão**: o artefato é ligado à atividade que declarou o ID de sessão do
+  Claude Code em `sessoes_claude` — vínculo exato, não heurística. Sem correspondência, ele
+  fica em "Sem atividade vinculada" e pode ser adotado depois com `artifact link`.
+- **Versionamento**: republicar a mesma URL incrementa a versão e guarda data e rótulo no
+  histórico, em vez de duplicar a entrada.
+- **Tools MCP**: `megabrain_artifact_add`, `megabrain_artifacts`, `megabrain_artifact_link`.
+- **CLI**: `kx artifact add|list|link`, em entrypoint próprio que não carrega o stack de
+  SQLite no caminho crítico — ela é chamada por hook a cada publicação.
+- **Automação**: hook `PostToolUse` da ferramenta `Artifact` (`~/.claude/hooks/register-artifact.mjs`)
+  registra sozinho, em qualquer projeto com `.kx.json`. Nunca bloqueia a sessão.
+
 ## 1.1.0 — 2026-08-19
 
 ### Busca

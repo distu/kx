@@ -151,6 +151,49 @@ O Claude Code vê estas tools quando o kx está ativo:
 
 ¹ Obrigatório somente quando `mcp.projectId` está configurado. O mesmo guard é aplicado às tools `megabrain_*`.
 
+### Registro de artefatos publicados
+
+Toda página publicada como artefato (`claude.ai/code/artifact/...`) é registrada no vault do
+projeto e vinculada à atividade em que o trabalho aconteceu — o hook `PostToolUse` da
+ferramenta `Artifact` faz isso sozinho, sem ninguém pedir.
+
+| Tool | Descrição | Parâmetros |
+|---|---|---|
+| `megabrain_artifact_add` | Registra (ou versiona) um artefato publicado | `url`, `titulo?`, `descricao?`, `arquivo?`, `atividade?`, `agente?`, `label?`, `sessao?` |
+| `megabrain_artifacts` | Lista os artefatos do projeto (link, versão, do que trata) | `atividade?`, `limit?` |
+| `megabrain_artifact_link` | Vincula um artefato já registrado a uma atividade | `url`, `atividade` |
+
+O índice legível fica em `.vault/ARTEFATOS.md` (indexado pela busca) e a fonte de verdade
+estruturada em `.vault/artefatos/artefatos.json`. O vínculo com a atividade é feito pelo ID
+de sessão do Claude Code que a atividade declarou em `sessoes_claude`.
+
+Instalação do hook (uma vez por máquina):
+
+```bash
+ln -s ~/distuai/kx/hooks/register-artifact.mjs ~/.claude/hooks/register-artifact.mjs
+```
+
+E em `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Artifact",
+        "hooks": [
+          { "type": "command", "command": "/opt/homebrew/bin/node ~/.claude/hooks/register-artifact.mjs", "timeout": 30 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+O hook nunca bloqueia a sessão: fora de um projeto com `.kx.json` ele sai em silêncio, e
+qualquer erro vira linha em `~/.kx/logs/artifact-hook.log`. Agentes sem a ferramenta
+`Artifact` (Codex, por exemplo) registram pela CLI `kx artifact add`.
+
 ---
 
 ## Comandos CLI
@@ -168,6 +211,12 @@ kx index --full       # Tudo do zero
 
 # Status
 kx status             # Contagem de docs, chunks, distribuição
+
+# Artefatos publicados (registro por projeto, vinculado à atividade)
+kx artifact list
+kx artifact list --atividade <slug-ou-id>
+kx artifact add --url https://claude.ai/code/artifact/<id> --titulo "Painel" --descricao "..." --agente codex
+kx artifact link --url https://claude.ai/code/artifact/<id> --atividade <slug-ou-id>
 
 # Watch (file watcher - geralmente via launchd)
 kx watch              # Observa mudanças e reindexa em tempo real
@@ -187,6 +236,8 @@ Cada projeto tem um `.vault/` com:
 
 ```
 .vault/
+  ARTEFATOS.md     Índice dos artefatos web publicados (gerado, não editar à mão)
+  artefatos/       Fonte de verdade do registro de artefatos + README explicativo
   _index/          Maps of Content (MOCs) — índices por tema
   private/         Conteúdo local que deve ser protegido pela denylist
   architecture/    Decisões e diagramas (Excalidraw)
