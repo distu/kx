@@ -9,6 +9,11 @@ on:
   pull_request:
     paths: ['install/**', 'src/**', 'bin/**', 'package*.json', '.github/workflows/installer.yml']
   workflow_dispatch:
+    inputs:
+      script_base:
+        description: 'Baixa os scripts desta URL (ex.: https://distu.dev/kx) em vez do checkout'
+        required: false
+        default: ''
 
 jobs:
   unix:
@@ -20,6 +25,7 @@ jobs:
     env:
       KX_REF: ${{ github.event.pull_request.head.sha || github.sha }}
       KX_YES: '1'
+      SCRIPT_BASE: ${{ inputs.script_base }}
     steps:
       - uses: actions/checkout@v4
       - name: Projeto de exemplo e agentes simulados
@@ -30,7 +36,9 @@ jobs:
           node "$GITHUB_WORKSPACE/install/test/make-demo.mjs" "$PWD"
       - name: curl | bash
         working-directory: ${{ runner.temp }}/demo
-        run: cat "$GITHUB_WORKSPACE/install/install.sh" | bash
+        run: |
+          if [ -n "$SCRIPT_BASE" ]; then curl -fsSL "$SCRIPT_BASE/install.sh" | bash
+          else cat "$GITHUB_WORKSPACE/install/install.sh" | bash; fi
       - name: kx no PATH, doctor e busca
         working-directory: ${{ runner.temp }}/demo
         run: |
@@ -58,6 +66,7 @@ jobs:
     env:
       KX_REF: ${{ github.event.pull_request.head.sha || github.sha }}
       KX_YES: '1'
+      SCRIPT_BASE: ${{ inputs.script_base }}
     steps:
       - uses: actions/checkout@v4
       - name: Projeto de exemplo e agentes simulados
@@ -68,7 +77,9 @@ jobs:
           node "$env:GITHUB_WORKSPACE\install\test\make-demo.mjs" "$env:RUNNER_TEMP\demo"
       - name: irm | iex
         working-directory: ${{ runner.temp }}\demo
-        run: Get-Content "$env:GITHUB_WORKSPACE\install\install.ps1" -Raw -Encoding UTF8 | Invoke-Expression
+        run: |
+          if ($env:SCRIPT_BASE) { irm "$env:SCRIPT_BASE/install.ps1" | iex }
+          else { Get-Content "$env:GITHUB_WORKSPACE\install\install.ps1" -Raw -Encoding UTF8 | Invoke-Expression }
       - name: kx.cmd, doctor e busca
         working-directory: ${{ runner.temp }}\demo
         run: |
