@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(__dirname, '..');
@@ -16,8 +16,9 @@ if (cwdArgIndex !== -1 && process.argv[cwdArgIndex + 1]) {
 }
 
 // Registrar tsx a partir do caminho correto
-const tsxApi = await import(resolve(packageRoot, 'node_modules', 'tsx', 'dist', 'esm', 'api', 'index.mjs'));
+// URL file:// em vez de caminho: no Windows o loader ESM rejeita "C:\\...".
+const tsxApi = await import(pathToFileURL(resolve(packageRoot, 'node_modules', 'tsx', 'dist', 'esm', 'api', 'index.mjs')).href);
 tsxApi.register();
 
 // Executar
-await import(resolve(packageRoot, 'src', 'index.ts'));
+await import(pathToFileURL(resolve(packageRoot, 'src', 'index.ts')).href);

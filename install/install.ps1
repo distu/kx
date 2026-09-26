@@ -61,7 +61,8 @@ function Install-Kx {
         # Comando nativo escrevendo em stderr não pode virar exceção no PowerShell 5.1.
         $previous = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        try { & $block *>> $script:log } finally { $ErrorActionPreference = $previous }
+        # Out-File em UTF-8: o redirecionamento *>> do PowerShell 5.1 grava em UTF-16.
+        try { & $block *>&1 | ForEach-Object { "$_" } | Out-File -FilePath $script:log -Append -Encoding utf8 } finally { $ErrorActionPreference = $previous }
         if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { Fail "falhou: $label" }
         $script:stepSecs = [int]$watch.Elapsed.TotalSeconds
     }
@@ -96,7 +97,7 @@ function Install-Kx {
     if (Test-Path (Join-Path $kxHome '.git')) { Fail "$kxHome é um checkout de desenvolvimento. Use KX_HOME=<outro diretório>." }
     foreach ($d in 'logs', 'models', 'bin', 'runtime') { New-Item -ItemType Directory -Force -Path (Join-Path $kxHome $d) | Out-Null }
     $script:log = Join-Path $kxHome 'logs\install.log'
-    Set-Content -Path $script:log -Value ''
+    Set-Content -Path $script:log -Value '' -Encoding UTF8
 
     # ---------- Node privado ----------
     $index = Invoke-RestMethod -Uri 'https://nodejs.org/dist/index.json' -UseBasicParsing
