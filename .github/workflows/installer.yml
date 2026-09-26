@@ -1,0 +1,97 @@
+name: installer
+
+# Instala o kx do zero em runners limpos, pelo mesmo caminho do usuário
+# (download do código no commit testado), e prova a integração MCP de ponta a ponta.
+on:
+  push:
+    branches: [main]
+    paths: ['install/**', 'src/**', 'bin/**', 'package*.json', '.github/workflows/installer.yml']
+  pull_request:
+    paths: ['install/**', 'src/**', 'bin/**', 'package*.json', '.github/workflows/installer.yml']
+  workflow_dispatch:
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      KX_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+      KX_YES: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Projeto de exemplo e agentes simulados
+        run: |
+          mkdir -p "$HOME/.claude" "$HOME/.codex" "$HOME/.cursor"
+          git config --global user.email t@t && git config --global user.name t
+          mkdir -p "$RUNNER_TEMP/demo" && cd "$RUNNER_TEMP/demo"
+          node "$GITHUB_WORKSPACE/install/test/make-demo.mjs" "$PWD"
+      - name: curl | bash
+        working-directory: ${{ runner.temp }}/demo
+        run: cat "$GITHUB_WORKSPACE/install/install.sh" | bash
+      - name: kx no PATH, doctor e busca
+        working-directory: ${{ runner.temp }}/demo
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          kx version
+          kx doctor
+          kx search "circuit-open" --top 2 | tee out.txt
+          grep -q CircuitBreakerConfig out.txt
+          test -f .mcp.json && test -f .codex/config.toml && test -f .cursor/mcp.json
+      - name: MCP de ponta a ponta
+        working-directory: ${{ runner.temp }}/demo
+        run: KX_MODELS_DIR="$HOME/.kx/models" "$HOME/.kx/runtime/current/bin/node" "$GITHUB_WORKSPACE/install/test/mcp-e2e.mjs" "$PWD"
+      - name: Desinstalar
+        run: |
+          bash install/install.sh --uninstall
+          test ! -e "$HOME/.local/bin/kx"
+      - if: failure()
+        run: cat "$HOME/.kx/logs/install.log" || true
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell   # Windows PowerShell 5.1, o pior caso
+    env:
+      KX_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+      KX_YES: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Projeto de exemplo e agentes simulados
+        run: |
+          New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude", "$env:USERPROFILE\.codex", "$env:USERPROFILE\.cursor" | Out-Null
+          git config --global user.email t@t; git config --global user.name t
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\demo" | Out-Null
+          node "$env:GITHUB_WORKSPACE\install\test\make-demo.mjs" "$env:RUNNER_TEMP\demo"
+      - name: irm | iex
+        working-directory: ${{ runner.temp }}\demo
+        run: Get-Content "$env:GITHUB_WORKSPACE\install\install.ps1" -Raw -Encoding UTF8 | Invoke-Expression
+      - name: kx.cmd, doctor e busca
+        working-directory: ${{ runner.temp }}\demo
+        run: |
+          $kx = "$env:USERPROFILE\.kx\bin\kx.cmd"
+          & $kx version
+          & $kx doctor; if ($LASTEXITCODE -ne 0) { exit 1 }
+          $out = & $kx search "circuit-open" --top 2 | Out-String
+          $out
+          if ($out -notmatch 'CircuitBreakerConfig') { exit 1 }
+          if (-not ((Test-Path .mcp.json) -and (Test-Path .codex\config.toml) -and (Test-Path .cursor\mcp.json))) { exit 1 }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($userPath -notlike "*\.kx\bin*") { exit 1 }
+      - name: MCP de ponta a ponta
+        working-directory: ${{ runner.temp }}\demo
+        run: |
+          $ver = Get-Content "$env:USERPROFILE\.kx\runtime\current.txt"
+          $env:KX_MODELS_DIR = "$env:USERPROFILE\.kx\models"
+          & "$env:USERPROFILE\.kx\runtime\node-$ver\node.exe" "$env:GITHUB_WORKSPACE\install\test\mcp-e2e.mjs" (Get-Location).Path
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Desinstalar
+        run: |
+          $env:KX_UNINSTALL = '1'
+          Get-Content "$env:GITHUB_WORKSPACE\install\install.ps1" -Raw -Encoding UTF8 | Invoke-Expression
+          if (Test-Path "$env:USERPROFILE\.kx\bin\kx.cmd") { exit 1 }
+      - if: failure()
+        run: Get-Content "$env:USERPROFILE\.kx\logs\install.log" -ErrorAction SilentlyContinue

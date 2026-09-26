@@ -92,6 +92,17 @@ const DEFAULT_CONFIG: KxConfig = {
   },
 };
 
+/**
+ * Expande `~` no início de um caminho da configuração. Sem isso, o exemplo
+ * documentado (`"index": "~/.kx/data/projeto.sqlite"`) criaria um diretório
+ * literal chamado `~` dentro do projeto.
+ */
+export function expandHome(path: string): string {
+  if (path === '~') return homedir();
+  if (path.startsWith('~/') || path.startsWith('~\\')) return resolve(homedir(), path.slice(2));
+  return path;
+}
+
 function findConfig(start: string): string | null {
   let dir = resolve(start);
   while (true) {
@@ -150,7 +161,7 @@ export function loadConfig(basePath?: string): KxConfig {
   // example temporary directories on macOS) remains project-relative after
   // `realpathSync` is applied by the central indexing gate.
   config.projectRoot = realpathSync(base);
-  config.index = resolve(base, config.index);
+  config.index = resolve(base, expandHome(config.index));
   config.sources = config.sources.map(s => ({
     ...s,
     path: resolve(base, s.path),

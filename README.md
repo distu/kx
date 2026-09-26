@@ -15,6 +15,58 @@ stress corpus: exact-identifier recall@10 goes from 3/20 (vector-only) to
 
 ---
 
+## Instalação
+
+Um comando instala tudo — um Node.js 22 privado (com SHA-256 verificado), o kx, o
+comando `kx` no PATH e o modelo de embedding — sem sudo, sem administrador e sem
+tocar no Node do sistema.
+
+**macOS e Linux**
+
+```bash
+curl -fsSL https://distu.dev/kx/install.sh | bash
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://distu.dev/kx/install.ps1 | iex
+```
+
+Rodado dentro de um repositório, o instalador oferece configurar o projeto na hora.
+Depois, em qualquer projeto:
+
+```bash
+kx setup     # gera .kx.json, registra o MCP no Claude Code/Codex/Cursor, indexa e testa
+kx doctor    # verifica runtime, SQLite, sqlite-vec, modelo, projeto e agentes
+```
+
+O `kx setup` cria a `.kx.json` com as fontes que existem no projeto, uma denylist de
+segredos (`.env*`, `*.pem`, `*.key`) e um UUID de asserção MCP (modo fail-closed), e
+registra o servidor apontando para o runtime privado — funciona mesmo em apps que não
+herdam o PATH do shell. Configuração existente é preservada; arquivos MCP são mesclados,
+sem apagar outros servidores. Modo não interativo: `kx setup --yes`.
+
+| Variável | Efeito |
+|---|---|
+| `KX_REF` | Tag, branch ou commit a instalar (padrão: última release, senão `main`) |
+| `KX_HOME` | Diretório da instalação (padrão `~/.kx`) |
+| `KX_YES=1` | Não pergunta nada; configura o projeto atual com os padrões |
+| `KX_NO_SETUP=1` | Só instala, sem configurar projeto |
+| `KX_NO_MODIFY_PATH=1` | Não altera o arquivo de inicialização do shell |
+
+Remover (índices em `~/.kx/data` são preservados; `--purge` apaga):
+
+```bash
+curl -fsSL https://distu.dev/kx/install.sh | bash -s -- --uninstall
+```
+
+O instalador é testado a cada mudança em runners limpos de Ubuntu, macOS e Windows
+(PowerShell 5.1), com handshake MCP real — veja `.github/workflows/installer.yml`.
+Os scripts ficam em [`install/`](install/). Linux com musl (Alpine) ainda não é suportado.
+
+---
+
 ## O que é
 
 **kx** é uma ferramenta que indexa toda a documentação, código-fonte, configurações e notas pessoais dos seus projetos em um banco local (SQLite + sqlite-vec + FTS5). Funciona como:

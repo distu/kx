@@ -94,7 +94,10 @@ async function loadExtractor(model: string): Promise<DisposablePipeline> {
   currentModel = model;
   // Import dinâmico: processos que nunca buscam não pagam o custo da biblioteca.
   loading = (async () => {
-    const { pipeline } = await import('@huggingface/transformers');
+    const { pipeline, env } = await import('@huggingface/transformers');
+    // Instalações via instalador guardam o modelo fora do app, para que uma
+    // atualização do kx não force um novo download.
+    if (process.env.KX_MODELS_DIR) env.cacheDir = process.env.KX_MODELS_DIR;
     console.error(`Carregando modelo de embedding: ${model}...`);
     // A sobrecarga genérica do Transformers.js fica excessivamente complexa em
     // algumas versões do TypeScript; a API retornada continua tipada abaixo.

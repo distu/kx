@@ -1,3 +1,4 @@
+import { kxVersion } from './version.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { realpathSync } from 'node:fs';
@@ -112,7 +113,7 @@ export function createMcpServer(config: KxConfig, hooks: McpServerHooks = {}): S
   );
 
   const server = new Server(
-    { name: 'kx', version: '1.2.0' },
+    { name: 'kx', version: kxVersion() },
     { capabilities: { tools: {} } }
   );
 
