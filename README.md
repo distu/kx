@@ -93,6 +93,10 @@ por hash de conteúdo. Detalhes, números e referências:
 | Latência p50 / p95 | — | 7 ms / 10 ms |
 | Concorrência (8 workers) | — | 142 buscas/s |
 
+<p align="center">
+  <img src="docs/img/busca-hibrida.png" width="100%" alt="Pipeline da busca híbrida: a consulta vira um embedding (sqlite-vec, top-200) e uma expressão MATCH (FTS5/BM25, top-200); os dois rankings são fundidos por Reciprocal Rank Fusion com k=60, multiplicados pelo peso da fonte e pela recência, deduplicados por SHA-1 e devolvidos como top-K. Recall@10 de termo exato: 3/20 só vetorial, 20/20 híbrida; latência p50 7 ms, p95 10 ms.">
+</p>
+
 Também embutido, sem configuração: `worktrees/`, `node_modules/`, artefatos de
 build (`.class`, `dist/`, `target/`...), binários, mídia e lockfiles nunca
 entram no índice.
@@ -101,34 +105,9 @@ entram no índice.
 
 ## Arquitetura
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        ~/.kx/ (global)                       │
-│                                                              │
-│  bin/kx.js          Binário único (MCP + CLI)                │
-│  src/               Código TypeScript                        │
-│  data/              Databases por projeto (isoladas)         │
-│    project-a.sqlite   40K chunks, 274MB                    │
-│    project-b.sqlite    (futuro)                             │
-│    project-c.sqlite     (futuro)                             │
-│  node_modules/      Dependências                             │
-└──────────────┬──────────────┬────────────────────────────────┘
-               │              │
-       ┌───────┴───┐    ┌────┴──────────┐
-       │ MCP Server│    │  CLI (kx)     │
-       │ (Claude)  │    │  (humano)     │
-       │           │    │               │
-       │ Lê/escreve│    │ Só lê         │
-       │ .sqlite   │    │ <200ms        │
-       └───────────┘    └───────────────┘
-               │              │
-       ┌───────┴──────────────┴───────────┐
-       │     Shared Embedding Engine       │
-       │  Transformers.js (in-process)     │
-       │  all-MiniLM-L6-v2 (384d, 23MB)   │
-       │  100% offline após download       │
-       └──────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/img/arquitetura.png" width="100%" alt="Arquitetura do kx: fontes do projeto (docs, código, configuração e vault, filtradas pela denylist) passam pelo watcher e pelo chunking, viram embedding de 384 dimensões e índice lexical FTS5/BM25, e são gravadas num SQLite por projeto em ~/.kx/data. O MCP server (com asserção fail-closed) e o CLI entregam os resultados ao Claude Code, Codex, Cursor, qualquer cliente MCP e ao terminal.">
+</p>
 
 ### Como o isolamento funciona
 

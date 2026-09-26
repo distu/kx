@@ -1,0 +1,58 @@
+/*
+ * Estilo dos diagramas do README, no mesmo visual da página do kx
+ * (distu.dev/projetos/kx). Regenerar as imagens: node docs/img/src/render.mjs
+ */
+:root {
+    --bg: #05070d;
+    --bg-2: #080c16;
+    --surface: #0c1222;
+    --line: rgba(214, 224, 255, .12);
+    --line-strong: rgba(214, 224, 255, .22);
+    --text: #e7eaf3;
+    --muted: #9aa3b8;
+    --dim: #6b7489;
+    --vec: #5ce1ff;
+    --lex: #d6ff3f;
+    --warm: #fff6e6;
+    --hot: #ff5a36;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --display: 'Bricolage Grotesque', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); }
+body { color: var(--text); font-family: var(--display); -webkit-font-smoothing: antialiased; }
+em { font-family: 'Instrument Serif', Georgia, serif; font-style: italic; font-weight: 400; color: var(--lex); }
+
+.canvas { position: relative; width: 1600px; padding: 56px 60px 48px; overflow: hidden; isolation: isolate;
+    background: radial-gradient(ellipse 50% 60% at 55% 55%, rgba(92, 225, 255, .07), transparent 70%),
+                radial-gradient(ellipse 35% 45% at 92% 10%, rgba(214, 255, 63, .06), transparent 70%), var(--bg); }
+.canvas::before { content: ''; position: absolute; inset: 0; z-index: -1; opacity: .5;
+    background-image: radial-gradient(rgba(214, 224, 255, .12) 1px, transparent 1px); background-size: 28px 28px; }
+
+.head { display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; margin-bottom: 40px; }
+.eyebrow { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; color: var(--muted); font: 500 13px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+.eyebrow b { color: var(--lex); font-weight: 600; }
+.mark { font: 800 22px/1 var(--display); letter-spacing: -.06em; }
+.mark span { color: var(--lex); }
+h1 { margin: 0; font-size: 50px; line-height: 1; letter-spacing: -.04em; font-weight: 700; }
+.note { max-width: 430px; margin: 0; color: var(--muted); font-size: 17px; line-height: 1.5; text-align: right; }
+
+.label { color: var(--dim); font: 600 12px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.card { position: relative; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); }
+.card h3 { margin: 0; font-size: 19px; letter-spacing: -.02em; line-height: 1.15; }
+.card p { margin: 6px 0 0; color: var(--muted); font-size: 14.5px; line-height: 1.45; }
+.card code { display: block; margin-top: 8px; color: var(--text); font: 500 13px/1.45 var(--mono); }
+.card--vec { border-color: rgba(92, 225, 255, .4); background: linear-gradient(180deg, rgba(92, 225, 255, .08), var(--bg-2) 70%); }
+.card--vec h3 { color: var(--vec); }
+.card--lex { border-color: rgba(214, 255, 63, .4); background: linear-gradient(180deg, rgba(214, 255, 63, .07), var(--bg-2) 70%); }
+.card--lex h3 { color: var(--lex); }
+.card--warm { border-color: rgba(255, 246, 230, .35); background: linear-gradient(180deg, rgba(255, 246, 230, .07), var(--bg-2) 70%); }
+.card--gate { border-style: dashed; border-color: rgba(255, 90, 54, .5); }
+.card--gate h3 { color: var(--hot); }
+
+.chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font: 500 12px/1 var(--mono); }
+.chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--lex); }
+
+.foot { display: flex; flex-wrap: wrap; gap: 10px 26px; margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--dim); font: 500 13px/1.4 var(--mono); }
+.foot b { color: var(--text); font-weight: 500; }

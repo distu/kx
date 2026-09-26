@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="diagram.css">
+<style>
+    .flow { display: grid; grid-template-columns: 200px 44px 340px 44px 400px 44px 1fr; align-items: center; }
+    .col { display: flex; flex-direction: column; gap: 10px; }
+    .arrow { position: relative; height: 100%; }
+    .arrow::before { content: ''; position: absolute; left: 8px; right: 10px; top: 50%; height: 2px; background: linear-gradient(90deg, var(--vec), var(--lex)); }
+    .arrow::after { content: ''; position: absolute; right: 6px; top: calc(50% - 5px); border: 6px solid transparent; border-left: 8px solid var(--lex); border-right: 0; }
+    .query { padding: 22px 18px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); }
+    .query code { display: block; margin-top: 12px; color: var(--warm); font: 500 17px/1.3 var(--mono); }
+    .query p { margin: 12px 0 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .lane { display: grid; grid-template-columns: 1fr 22px 1fr; align-items: center; gap: 6px; }
+    .lane .to { color: var(--dim); font: 600 16px/1 var(--mono); text-align: center; }
+    .lane + .lane { margin-top: 14px; }
+    .step { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); }
+    .step b { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--lex); font: 600 13px/1 var(--mono); }
+    .step h3 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
+    .step code { display: block; margin-top: 5px; color: var(--muted); font: 500 13px/1.4 var(--mono); }
+    .step--rrf { border-color: rgba(255, 246, 230, .4); background: linear-gradient(180deg, rgba(255, 246, 230, .07), var(--bg-2) 70%); }
+    .step--rrf code { color: var(--text); white-space: nowrap; font-size: 12.5px; }
+    .step--rrf code .v { color: var(--vec); }
+    .step--rrf code .l { color: var(--lex); }
+    .down { width: 2px; height: 12px; margin: 0 0 0 30px; background: var(--line-strong); }
+    .result { padding: 20px 18px; border: 1px solid rgba(214, 255, 63, .45); border-radius: 14px; background: linear-gradient(180deg, rgba(214, 255, 63, .08), var(--bg-2) 65%); }
+    .result h3 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+    .result p { margin: 8px 0 0; color: var(--muted); font-size: 14.5px; line-height: 1.45; }
+    .metric { display: grid; grid-template-columns: 1fr auto; align-items: baseline; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .metric span { color: var(--muted); font: 500 13px/1.3 var(--mono); }
+    .metric strong { font-size: 30px; letter-spacing: -.04em; }
+    .metric strong small { color: var(--muted); font-size: 15px; font-weight: 500; }
+    .metric strong.lex { color: var(--lex); }
+    .bars { display: grid; grid-template-columns: repeat(20, 1fr); gap: 2px; grid-column: 1 / -1; margin-top: 8px; }
+    .bars i { height: 12px; border-radius: 2px; background: rgba(255, 255, 255, .07); }
+    .bars.v i:nth-child(-n+3) { background: var(--vec); }
+    .bars.h i { background: var(--lex); }
+</style>
+</head>
+<body>
+<div class="canvas" id="shot">
+    <div class="head">
+        <div>
+            <p class="eyebrow"><span class="mark">k<span>x</span></span> · <b>busca híbrida</b></p>
+            <h1>Duas vias de busca. <em>Um ranking.</em></h1>
+        </div>
+        <p class="note">O vetor acha paráfrase e conceito; o BM25 acha o identificador exato. A fusão é por posição, então as escalas não precisam ser calibradas.</p>
+    </div>
+
+    <div class="flow">
+        <div class="query">
+            <span class="label">Consulta</span>
+            <code>"circuit-open"</code>
+            <p>Vira um embedding e uma expressão MATCH com cada termo entre aspas.</p>
+        </div>
+        <div class="arrow"></div>
+
+        <div>
+            <span class="label">Duas vias em paralelo</span>
+            <div class="lane" style="margin-top: 14px">
+                <div class="card card--vec"><h3>Embedding</h3><code>384d · MiniLM</code></div>
+                <span class="to">→</span>
+                <div class="card card--vec"><h3>sqlite-vec</h3><code>top-200</code></div>
+            </div>
+            <div class="lane">
+                <div class="card card--lex"><h3>MATCH</h3><code>termos entre aspas</code></div>
+                <span class="to">→</span>
+                <div class="card card--lex"><h3>FTS5 · BM25</h3><code>top-200</code></div>
+            </div>
+        </div>
+        <div class="arrow"></div>
+
+        <div class="col" style="gap: 0">
+            <div class="step step--rrf"><b>1</b><div><h3>Reciprocal Rank Fusion · k = 60</h3><code>Σ <span class="v">1/(60 + rank<sub>vet</sub>)</span> + <span class="l">1/(60 + rank<sub>bm25</sub>)</span></code></div></div>
+            <div class="down"></div>
+            <div class="step"><b>2</b><div><h3>× peso da fonte</h3><code>1 + log2(w) · definido na .kx.json</code></div></div>
+            <div class="down"></div>
+            <div class="step"><b>3</b><div><h3>× recência</h3><code>1 + 0,3 · 2^(−idade/90d) · teto +30%</code></div></div>
+            <div class="down"></div>
+            <div class="step"><b>4</b><div><h3>Dedup por conteúdo</h3><code>SHA-1 · fica a cópia mais bem colocada</code></div></div>
+        </div>
+        <div class="arrow"></div>
+
+        <div class="result">
+            <span class="label">Top-K para o agente</span>
+            <h3 style="margin-top: 12px">Chunks relevantes, de vários arquivos</h3>
+            <p>Cada resultado informa se veio das duas vias, só do vetor ou só do BM25.</p>
+            <div class="metric"><span>recall@10 · termo exato<br>só vetorial</span><strong>3<small>/20</small></strong><div class="bars v"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+            <div class="metric"><span>recall@10 · termo exato<br>híbrida</span><strong class="lex">20<small>/20</small></strong><div class="bars h"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+            <div class="metric"><span>latência p50 · p95</span><strong>7<small> ms · 10 ms</small></strong></div>
+        </div>
+    </div>
+
+    <div class="foot">
+        <span><b>Medição</b> corpus sintético de stress, pipeline real</span>
+        <span><b>Recência</b> desligável por projeto: "search": { "recency": false }</span>
+        <span><b>Detalhes</b> docs/ARQUITETURA-BUSCA.md</span>
+    </div>
+</div>
+</body>
+</html>
