@@ -16,7 +16,7 @@ if (cwdArgIndex !== -1 && process.argv[cwdArgIndex + 1]) {
 }
 
 // Registrar tsx a partir do caminho correto
-// URL file:// em vez de caminho: no Windows o loader ESM rejeita "C:\\...".
+// URL file:// em vez de caminho: no Windows o loader ESM rejeita "C:\...".
 const tsxApi = await import(pathToFileURL(resolve(packageRoot, 'node_modules', 'tsx', 'dist', 'esm', 'api', 'index.mjs')).href);
 tsxApi.register();
 
