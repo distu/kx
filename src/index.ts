@@ -5,7 +5,17 @@ const command = args[0];
 
 // Imports lazy por modo: cada comando carrega apenas o que precisa.
 // Em especial, o modo 'daemon' (Cockpit) NAO carrega o stack de SQLite/embeddings.
-if (command === 'daemon') {
+if (command === 'setup' || command === 'init') {
+  // Configurador automático: roda antes de existir qualquer .kx.json.
+  const { runSetup } = await import('./setup.js');
+  process.exitCode = await runSetup(args.slice(1));
+} else if (command === 'doctor') {
+  const { runDoctor } = await import('./doctor.js');
+  process.exitCode = await runDoctor(args.slice(1));
+} else if (command === 'version' || command === '--version' || command === '-v') {
+  const { kxVersion } = await import('./doctor.js');
+  console.log(`kx ${kxVersion()} · node ${process.version}`);
+} else if (command === 'daemon') {
   // Daemon HTTP local do KX Cockpit (kxd). Fase 0: somente leitura.
   const { startDaemon } = await import('./daemon/server.js');
   startDaemon(args.slice(1));
