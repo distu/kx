@@ -1,179 +1,250 @@
 # kx — Knowledge indeX
 
-> Busca híbrida local (semântica + BM25) para dar contexto de projeto a agentes de IA.
-> MCP server + CLI, 100% offline, multi-projeto com bases isoladas.
-> Funciona com Claude Code, Codex, Cursor e qualquer cliente MCP.
+> Local hybrid search for AI coding agents: turn your code, documentation, and notes into searchable project context.
 
-[![ci](https://github.com/distu/kx/actions/workflows/ci.yml/badge.svg)](https://github.com/distu/kx/actions/workflows/ci.yml)
+[![CI](https://github.com/distu/kx/actions/workflows/ci.yml/badge.svg)](https://github.com/distu/kx/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![MCP server](https://img.shields.io/badge/MCP-server-green.svg)](#connect-your-ai-agent)
 
-**English summary**: kx indexes your project's docs, code, configs and notes into a
-local SQLite database (sqlite-vec + FTS5) and serves hybrid search — dense
-embeddings fused with BM25 via Reciprocal Rank Fusion, with recency decay and
-content dedup — as an MCP server and an offline CLI. Measured on a synthetic
-stress corpus: exact-identifier recall@10 goes from 3/20 (vector-only) to
-**20/20 (hybrid)** at p50 7 ms per query. No cloud, no API keys, no telemetry.
+**kx** is a local-first **Model Context Protocol (MCP) server and CLI** for semantic and keyword search across software projects. It combines embedding-based retrieval with BM25 full-text search, so AI agents can find both architectural concepts and exact identifiers before writing code.
 
----
+Use it with **Claude Code, Codex, Cursor, or another stdio MCP client**, or search directly from your terminal. Retrieval runs on your machine using SQLite, sqlite-vec, FTS5, and Transformers.js. No hosted vector database, cloud inference API, or API key is required. The embedding model downloads on first use; indexing and search can then run offline with the model cached.
 
-## O que é
+If you are building an AI coding workflow, a local retrieval-augmented generation (RAG) pipeline, or a searchable developer knowledge base, kx provides the retrieval layer. Your agent chooses when to call it and how to use the returned context.
 
-**kx** é uma ferramenta que indexa toda a documentação, código-fonte, configurações e notas pessoais dos seus projetos em um banco local (SQLite + sqlite-vec + FTS5). Funciona como:
+[Quick start](#quick-start) · [MCP setup](#connect-your-ai-agent) · [CLI](#cli-reference) · [Contributing](#contributing)
 
-1. **MCP Server** — tool nativa no Claude Code/Codex/Cursor que injeta contexto relevante automaticamente
-2. **CLI offline** — busca rápida durante reuniões, sem chamar nenhum LLM
+## Why kx?
 
-O agente consulta o kx antes de implementar código, fazer review, ou responder perguntas sobre o projeto. Você consulta via terminal quando precisa de respostas rápidas.
+- **Hybrid retrieval:** semantic search finds related ideas; BM25 finds class names, configuration keys, and error messages. Reciprocal Rank Fusion (RRF) merges the rankings.
+- **Local project context:** search Markdown docs, source code, configuration files, and personal notes without uploading the indexed corpus to a search service.
+- **Separate project indexes:** each project defines its own sources and SQLite database in `.kx.json`. Optional per-call MCP identity checks help prevent accidental cross-project access.
+- **Incremental updates:** index changed files on demand or keep the index current with a file watcher.
+- **Useful results:** source paths, content snippets, type filters, recency weighting, and content deduplication help agents select relevant evidence.
+- **Project continuity:** optional activity tracking and an artifact registry keep progress notes and published links in a local Markdown vault.
+- **Small operational footprint:** embeddings run in-process; the core search workflow needs no separate model server or database service.
 
-## Por que híbrida
+## Quick start
 
-Embeddings densos acham paráfrase e conceito, mas erram exatamente o que um dev
-mais busca num corpus técnico: identificadores, nomes de configuração e
-mensagens de erro. Medição em índice real de 75 mil chunks: `circuit-open`
-presente em 20 chunks e ausente até do top-50 vetorial. A v1.1 funde a via
-vetorial com BM25 (FTS5) por Reciprocal Rank Fusion, aplica impulso de
-recência com meia-vida (docs e decisões novas valem mais) e colapsa duplicatas
-por hash de conteúdo. Detalhes, números e referências:
-[docs/ARQUITETURA-BUSCA.md](docs/ARQUITETURA-BUSCA.md).
+### 1. Install from source
 
-| Métrica (stress, pipeline real) | Vetorial pura | Híbrida v1.1 |
-|---|---|---|
-| Recall@10 de termo exato | 3/20 | **20/20** |
-| Latência p50 / p95 | — | 7 ms / 10 ms |
-| Concorrência (8 workers) | — | 142 buscas/s |
-
-Também embutido, sem configuração: `worktrees/`, `node_modules/`, artefatos de
-build (`.class`, `dist/`, `target/`...), binários, mídia e lockfiles nunca
-entram no índice.
-
----
-
-## Arquitetura
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        ~/.kx/ (global)                       │
-│                                                              │
-│  bin/kx.js          Binário único (MCP + CLI)                │
-│  src/               Código TypeScript                        │
-│  data/              Databases por projeto (isoladas)         │
-│    project-a.sqlite   40K chunks, 274MB                    │
-│    project-b.sqlite    (futuro)                             │
-│    project-c.sqlite     (futuro)                             │
-│  node_modules/      Dependências                             │
-└──────────────┬──────────────┬────────────────────────────────┘
-               │              │
-       ┌───────┴───┐    ┌────┴──────────┐
-       │ MCP Server│    │  CLI (kx)     │
-       │ (Claude)  │    │  (humano)     │
-       │           │    │               │
-       │ Lê/escreve│    │ Só lê         │
-       │ .sqlite   │    │ <200ms        │
-       └───────────┘    └───────────────┘
-               │              │
-       ┌───────┴──────────────┴───────────┐
-       │     Shared Embedding Engine       │
-       │  Transformers.js (in-process)     │
-       │  all-MiniLM-L6-v2 (384d, 23MB)   │
-       │  100% offline após download       │
-       └──────────────────────────────────┘
-```
-
-### Como o isolamento funciona
-
-Cada projeto tem:
-- **`.kx.json`** na raiz do projeto → define fontes, aponta para seu `.sqlite` e pode ativar a asserção MCP por UUID
-- **`.mcp.json`** na raiz do projeto → registra kx como MCP server no Claude Code
-- **`.vault/`** na raiz do projeto → notas pessoais (reuniões e decisões)
-- **`~/.kx/data/{projeto}.sqlite`** → database dedicada ao projeto
-
-O binário `~/.kx/bin/kx.js` é compartilhado. A configuração é por projeto.
-
-```
-Projeto A:  .kx.json → ~/.kx/data/projeto-a.sqlite
-Projeto B:  .kx.json → ~/.kx/data/projeto-b.sqlite
-Projeto C:  .kx.json → ~/.kx/data/projeto-c.sqlite
-```
-
----
-
-## Stack Técnico
-
-| Componente | Ferramenta | Por quê |
-|---|---|---|
-| **Banco vetorial** | sqlite-vec (extensão SQLite) | Arquivo único, WAL mode (leitura concorrente MCP+CLI), ~24KB |
-| **Embeddings** | Transformers.js + all-MiniLM-L6-v2 | In-process, sem Ollama, 23MB ONNX, 384 dimensões, offline |
-| **MCP SDK** | @modelcontextprotocol/sdk | Protocolo oficial Anthropic, stdio transport |
-| **CLI** | Commander.js | Parsing de argumentos, help automático |
-| **File watcher** | Chokidar | Detecta mudanças e reindexa incrementalmente |
-| **Runtime** | Node.js 22+ com tsx | TypeScript direto sem build step |
-
-### Recursos
-
-| Métrica | Valor |
-|---|---|
-| RAM do processo MCP antes da primeira busca | ~150–170MB na medição local de referência |
-| RAM do processo MCP após carregar embeddings | ~380–390MB na medição local de referência |
-| Disco por projeto (40K chunks) | ~274MB |
-| Tempo de indexação completa | ~6 minutos |
-| Tempo de reindexação incremental | <10 segundos |
-| Primeira busca MCP em índice pequeno | ~110–120ms na medição local de referência |
-| Busca MCP quente em índice pequeno | ~5–10ms na medição local de referência |
-| Asserção de identidade por chamada | <0,01ms; sem round-trip adicional |
-| Modelo de embedding | ~23MB (download único) |
-
-Os números variam com Node.js, sistema operacional, tamanho do índice e quantidade de resultados. Cada processo MCP carrega sua própria cópia do modelo após a primeira busca; muitas sessões simultâneas multiplicam o uso de memória.
-
----
-
-## O que é indexado
-
-| Tipo | Extensões | Chunking |
-|---|---|---|
-| **Documentação** (docs) | `*.md` | Headers como limite, ~512 tokens, 10% overlap |
-| **Vault pessoal** (vault) | `*.md` no `.vault/` | Idem, wikilinks removidos na indexação |
-| **Código** (code) | `*.java`, `*.ts`, `*.tsx`, `*.sql` | Por função/método/classe, ~1024 tokens |
-| **Configuração** (config) | `*.yml`, `*.properties`, `*.json`, `*.xml`, `*.gradle`, `Dockerfile*` | Arquivo inteiro ou por seção, ~256 tokens; use a denylist para arquivos que não podem ser indexados |
-
-Exclusões automáticas: `node_modules/`, `.git/`, `build/`, `target/`, `dist/`, `.obsidian/`
-
----
-
-## Tools MCP
-
-O Claude Code vê estas tools quando o kx está ativo:
-
-| Tool | Descrição | Parâmetros |
-|---|---|---|
-| `search` | Busca semântica na documentação, código e vault | `expected_project_id`¹, `expected_project_root`¹, `query`, `top?`, `type?` |
-| `ingest` | Indexa arquivo ou diretório específico | `expected_project_id`¹, `expected_project_root`¹, `path` |
-| `reindex` | Reindexação completa ou incremental | `expected_project_id`¹, `expected_project_root`¹, `mode` |
-| `status` | Estatísticas do índice | `expected_project_id`¹, `expected_project_root`¹ |
-
-¹ Obrigatório somente quando `mcp.projectId` está configurado. O mesmo guard é aplicado às tools `megabrain_*`.
-
-### Registro de artefatos publicados
-
-Toda página publicada como artefato (`claude.ai/code/artifact/...`) é registrada no vault do
-projeto e vinculada à atividade em que o trabalho aconteceu — o hook `PostToolUse` da
-ferramenta `Artifact` faz isso sozinho, sem ninguém pedir.
-
-| Tool | Descrição | Parâmetros |
-|---|---|---|
-| `megabrain_artifact_add` | Registra (ou versiona) um artefato publicado | `url`, `titulo?`, `descricao?`, `arquivo?`, `atividade?`, `agente?`, `label?`, `sessao?` |
-| `megabrain_artifacts` | Lista os artefatos do projeto (link, versão, do que trata) | `atividade?`, `limit?` |
-| `megabrain_artifact_link` | Vincula um artefato já registrado a uma atividade | `url`, `atividade` |
-
-O índice legível fica em `.vault/ARTEFATOS.md` (indexado pela busca) e a fonte de verdade
-estruturada em `.vault/artefatos/artefatos.json`. O vínculo com a atividade é feito pelo ID
-de sessão do Claude Code que a atividade declarou em `sessoes_claude`.
-
-Instalação do hook (uma vez por máquina):
+Use Node.js 22 or later and npm. SQLite and ONNX dependencies include native components; some platforms may require compiler tools if a matching prebuilt binary is unavailable.
 
 ```bash
-ln -s ~/distuai/kx/hooks/register-artifact.mjs ~/.claude/hooks/register-artifact.mjs
+git clone https://github.com/distu/kx.git "$HOME/.kx"
+cd "$HOME/.kx"
+npm ci
+npm run build
+npm link
 ```
 
-E em `~/.claude/settings.json`:
+Choose another installation directory if `~/.kx` is already in use. `npm link` makes the `kx` command available; you can also run `node /absolute/path/to/kx/bin/kx.js` directly.
+
+### 2. Configure a project
+
+Create `.kx.json` in the root of the project you want to search:
+
+```json
+{
+  "project": "my-project",
+  "index": ".kx-data/index.sqlite",
+  "sources": [
+    { "type": "docs", "path": "docs", "glob": "**/*.md" },
+    { "type": "code", "path": "src", "glob": "**/*.{java,ts,tsx,sql}" },
+    { "type": "vault", "path": ".vault", "glob": "**/*.md" }
+  ],
+  "indexing": {
+    "deny": [
+      ".vault/private/**",
+      "**/.env*",
+      "**/*.key",
+      "**/*.pem",
+      "**/secrets/**"
+    ]
+  }
+}
+```
+
+Keep only sources that exist in your project. Source paths and the index path are resolved relative to `.kx.json`; use an absolute path if you prefer storing the database elsewhere. Give each project a separate database path.
+
+Keep local configuration, databases, and private notes out of version control. For example, add these entries to the project's `.gitignore`:
+
+```gitignore
+.kx.json
+.mcp.json
+.kx-data/
+.vault/
+```
+
+### 3. Index and search
+
+Run these commands from the configured project:
+
+```bash
+kx index
+kx search "how does authentication work?" --top 5
+kx search "SecurityConfig" --type code --top 3
+kx status
+```
+
+The first indexing run downloads the embedding model. Later runs reuse the local cache. Use `kx watch` to reindex files as they change.
+
+## Connect your AI agent
+
+kx exposes tools over the MCP stdio transport. Configure your client to launch:
+
+```bash
+kx mcp --strict-project-root --project-root /absolute/path/to/project
+```
+
+The explicit root selects the project's `.kx.json`; strict mode rejects an implicit project root. If your client cannot find `kx` on its `PATH`, use `node` with the absolute path to `bin/kx.js` instead.
+
+### Project identity checks
+
+For new MCP integrations, generate a unique, non-secret UUID with `uuidgen` and add it to the project's existing `.kx.json`:
+
+```json
+{
+  "mcp": {
+    "projectId": "5b680e1f-92d5-4a47-8e33-fac913f65a71"
+  }
+}
+```
+
+The UUID above is an example; generate your own for each project. When `mcp.projectId` is configured, every MCP tool call must include:
+
+- `expected_project_id`: the UUID read from the active project's `.kx.json`.
+- `expected_project_root`: the absolute path to the active project root.
+
+The server checks the UUID and canonical root before accessing project data. Missing or mismatched assertions return `KX_PROJECT_ASSERTION_REQUIRED` or `KX_PROJECT_MISMATCH`. Projects without `mcp.projectId` retain the legacy startup-based behavior for compatibility.
+
+### Client configuration example
+
+For clients that accept an `mcpServers` configuration, including a project-level Claude Code `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "kx": {
+      "command": "kx",
+      "args": [
+        "mcp",
+        "--strict-project-root",
+        "--project-root",
+        "/absolute/path/to/project"
+      ]
+    }
+  }
+}
+```
+
+Other MCP clients may use a different configuration format. Use the same executable and arguments in their MCP server settings.
+
+### Give the agent a retrieval workflow
+
+Add instructions like these to your project's agent instructions file:
+
+```markdown
+## Project context with kx
+
+Before calling a KX MCP tool, read mcp.projectId from the active root's
+.kx.json. Send it as expected_project_id and send the active absolute root
+as expected_project_root on every call. Stop using the server instance if
+it returns KX_PROJECT_MISMATCH.
+
+Search project context before implementation, refactoring, architecture
+questions, or code review. Start with 3–5 results and inspect the referenced
+source files before making changes.
+
+Use exact text or AST search for known symbols and precise line locations.
+```
+
+## How hybrid search works
+
+Vector-only search can miss the exact strings developers need. kx combines two retrieval paths and merges their rankings:
+
+```mermaid
+flowchart TD
+    Q[Search query] --> V[Local embedding + sqlite-vec]
+    Q --> L[FTS5 full-text search + BM25]
+    V --> R[Reciprocal Rank Fusion]
+    L --> R
+    R --> W[Source weights + recency boost]
+    W --> D[Content deduplication]
+    D --> O[Ranked chunks with source paths]
+```
+
+Markdown is split around headings, code around function and class boundaries using heuristics, and configuration around file or section boundaries. Chunks are constrained to a conservative embedding token budget to reduce model truncation.
+
+The default embedding model is `Xenova/all-MiniLM-L6-v2` with 384 dimensions. The default recency boost has a 90-day half-life and a maximum weight of 0.3. You can tune or disable it:
+
+```json
+{
+  "search": {
+    "recency": { "halfLifeDays": 90, "weight": 0.3 }
+  }
+}
+```
+
+Use `"recency": false` to disable the boost. A source can also define an optional `weight` greater than 1 to increase its priority.
+
+### Reported benchmark
+
+The existing synthetic stress benchmark uses the real indexing and search pipeline on Apple Silicon:
+
+| Metric | Vector-only | Hybrid search |
+| --- | --- | --- |
+| Exact-identifier recall@10 | 3/20 | 20/20 |
+| Warm query latency, p50 / p95 | — | 7 ms / 10 ms |
+| Throughput with 8 workers | — | 142 searches/s |
+
+These are measurements from the documented benchmark, not performance guarantees. Results depend on hardware, corpus, cache state, and configuration. Run `npm run stress` to evaluate your environment. The [search architecture notes](docs/ARQUITETURA-BUSCA.md) describe the original benchmark and retrieval design; that document is currently in Portuguese.
+
+## CLI reference
+
+```bash
+# Hybrid search: natural language, exact terms, or JSON output
+kx search "how are background jobs retried?"
+kx search "SecurityConfig" --type code --top 3
+kx search "authentication decision" --type vault
+kx search "request timeout" --json
+
+# Index maintenance
+kx index                  # Incremental indexing
+kx index --full           # Rebuild the index
+kx status                 # Document and chunk counts by source type
+kx vacuum                 # Compact the SQLite database
+kx watch                  # Watch files and reindex changes
+
+# MCP server
+kx mcp --strict-project-root --project-root /absolute/path/to/project
+```
+
+Search types are `docs`, `code`, `config`, `vault`, and `all`. The legacy `kx mcp` command discovers configuration from the working directory and its parents, with a home-directory fallback.
+
+### Published artifacts
+
+The optional artifact registry records published pages, tracks versions, and links them to project activities:
+
+```bash
+kx artifact list
+kx artifact list --atividade <activity-slug-or-id>
+kx artifact add --url "https://example.com/demo" --titulo "Demo" --descricao "Architecture overview" --agente codex
+kx artifact link --url "https://example.com/demo" --atividade <activity-slug-or-id>
+```
+
+The existing artifact flags and MCP parameter names retain their original Portuguese identifiers for API compatibility: `titulo` means title, `descricao` means description, `atividade` means activity, `agente` means agent, `arquivo` means source file, and `sessao` means session.
+
+The human-readable registry is `.vault/ARTEFATOS.md`; structured records live in `.vault/artefatos/artefatos.json`. Other agents can register links through the CLI or MCP tools.
+
+An optional Claude Code hook automatically registers successful publications from an `Artifact` tool. It requires kx at `~/.kx`, including `bin/kx-mcp.sh`. To install the hook:
+
+```bash
+mkdir -p "$HOME/.claude/hooks"
+ln -s "$HOME/.kx/hooks/register-artifact.mjs" "$HOME/.claude/hooks/register-artifact.mjs"
+```
+
+Merge the following hook into your existing `~/.claude/settings.json`. Ensure `node` is available in the hook environment:
 
 ```json
 {
@@ -182,7 +253,11 @@ E em `~/.claude/settings.json`:
       {
         "matcher": "Artifact",
         "hooks": [
-          { "type": "command", "command": "/opt/homebrew/bin/node ~/.claude/hooks/register-artifact.mjs", "timeout": 30 }
+          {
+            "type": "command",
+            "command": "node ~/.claude/hooks/register-artifact.mjs",
+            "timeout": 30
+          }
         ]
       }
     ]
@@ -190,242 +265,86 @@ E em `~/.claude/settings.json`:
 }
 ```
 
-O hook nunca bloqueia a sessão: fora de um projeto com `.kx.json` ele sai em silêncio, e
-qualquer erro vira linha em `~/.kx/logs/artifact-hook.log`. Agentes sem a ferramenta
-`Artifact` (Codex, por exemplo) registram pela CLI `kx artifact add`.
+The hook exits quietly outside a configured project. Registration errors are logged to `~/.kx/logs/artifact-hook.log` without failing the session.
 
----
+## MCP tools
 
-## Comandos CLI
+| Tool | Purpose |
+| --- | --- |
+| `search` | Hybrid search across indexed project content; accepts `query`, `top`, and `type`. |
+| `ingest` | Index a file or directory admitted by the project's indexing policy. |
+| `reindex` | Run a full or incremental project reindex. |
+| `status` | Report index statistics. |
+| `megabrain_add` | Create a project activity and update its Markdown index. |
+| `megabrain_update` | Record progress, a blocker, or completion. |
+| `megabrain_status` | List activities and their current status. |
+| `megabrain_get` | Read an activity by slug or numeric ID. |
+| `megabrain_artifact_add` | Register or version a published artifact. |
+| `megabrain_artifacts` | List registered artifacts, optionally filtered by activity. |
+| `megabrain_artifact_link` | Link an existing artifact to an activity. |
 
-```bash
-# Busca semântica
-kx search "como funciona o RBAC do PDV"
-kx search "SecurityConfig" --type code --top 3
-kx search "decisão de autenticação" --type vault
-kx search "Kong dual auth" --json
+All tools require the project identity arguments when `mcp.projectId` is enabled. Existing `megabrain_*` tool names are retained for compatibility; they implement the KX activity manager and artifact registry.
 
-# Indexação
-kx index              # Incremental (só mudanças)
-kx index --full       # Tudo do zero
+## Local notes and project isolation
 
-# Status
-kx status             # Contagem de docs, chunks, distribuição
+Each project owns its configuration, index, and optional `.vault/`. You can open the vault in Obsidian or maintain it with any Markdown editor. Typical folders include `architecture/`, `meetings/`, `decisions/`, `cheatsheets/`, and `_index/` for maps of content.
 
-# Artefatos publicados (registro por projeto, vinculado à atividade)
-kx artifact list
-kx artifact list --atividade <slug-ou-id>
-kx artifact add --url https://claude.ai/code/artifact/<id> --titulo "Painel" --descricao "..." --agente codex
-kx artifact link --url https://claude.ai/code/artifact/<id> --atividade <slug-ou-id>
+The kx executable can be shared across projects. Only the configured sources are indexed, and each project should point to a distinct SQLite file. Retrieved chunks are returned to the requesting MCP client; if that client uses a hosted AI model, its own data-handling settings determine where that context goes.
 
-# Watch (file watcher - geralmente via launchd)
-kx watch              # Observa mudanças e reindexa em tempo real
+### Indexing policy
 
-# MCP server legado, com descoberta pela cwd
-kx mcp
+Built-in filters skip common dependency directories, nested worktrees, build outputs, binary files, media, and lockfiles. Explicitly configured source roots can change how directory exclusions apply.
 
-# MCP server fail-closed, recomendado para projetos novos
-kx mcp --strict-project-root --project-root /caminho/absoluto/do/projeto
-```
+`sources[].exclude` limits a source scan. Use the project-wide `indexing.deny` list when a path must also be blocked from individual ingestion and watcher updates. Deny patterns are glob paths relative to the project root, and the policy is opt-in. Indexing, search, and watcher operations reconcile the index so blocked paths stop appearing in results.
 
----
+Deletion from SQLite is logical: old content may remain in free pages, WAL files, snapshots, or backups. If sensitive material was previously indexed, rotate any exposed credential, stop KX processes, remove the affected index and its `-wal`/`-shm` files, and rebuild from allowed sources. A denylist does not provide retroactive physical erasure.
 
-## Vault Obsidian
+### Memory and optional background services
 
-Cada projeto tem um `.vault/` com:
+The embedding model loads lazily. Each MCP process that performs a search keeps its own model instance, so memory use increases with concurrent clients. Use `KX_EMBEDDER_IDLE_UNLOAD_MINUTES` to opt into unloading the model after an idle interval.
 
-```
-.vault/
-  ARTEFATOS.md     Índice dos artefatos web publicados (gerado, não editar à mão)
-  artefatos/       Fonte de verdade do registro de artefatos + README explicativo
-  _index/          Maps of Content (MOCs) — índices por tema
-  private/         Conteúdo local que deve ser protegido pela denylist
-  architecture/    Decisões e diagramas (Excalidraw)
-  services/        Contexto pessoal por microsserviço
-  integrations/    Fluxos entre serviços e terceiros
-  standards/       Resumos rápidos dos padrões
-  database/        Contexto de banco
-  meetings/        Notas de reunião
-  decisions/       Decisões pessoais e trade-offs
-  sprint/          Contexto de sprint e bloqueios
-  team/            Squads e membros (com IDs das ferramentas)
-  cheatsheets/     Comandos e atalhos
-  templates/       Templates Templater (tpl-meeting, tpl-adr, etc.)
-```
+`kx watch` runs in the foreground; use your operating system's service manager if you want it to run continuously. The optional KX Cockpit has a local HTTP daemon and a macOS SwiftUI client. See the [Cockpit documentation](docs/cockpit/README.md), currently in Portuguese, for its setup and scope.
 
-**Regra**: Repo Git = equipe. Vault = pessoal. O kx só indexa conteúdo que não seja bloqueado pela configuração do projeto.
+## Technology
 
-## Proteção opt-in de paths
+| Component | Implementation |
+| --- | --- |
+| Runtime | Node.js 22+ and TypeScript, executed with tsx |
+| Storage | SQLite through better-sqlite3, with WAL mode |
+| Vector retrieval | sqlite-vec |
+| Keyword retrieval | SQLite FTS5 / BM25 |
+| Ranking | Reciprocal Rank Fusion, source weights, recency boost, content deduplication |
+| Embeddings | Transformers.js with a local ONNX model |
+| Agent integration | Model Context Protocol SDK, stdio transport |
+| CLI and file watching | Commander.js and Chokidar |
+| Optional desktop client | SwiftUI on macOS |
 
-`sources[].exclude` reduz o conjunto percorrido na reindexação por fonte, mas não é uma barreira de segurança para chamadas individuais. Para impedir que um caminho seja indexado por reindexação completa, incremental, watcher ou MCP `ingest`, adicione uma denylist global ao `.kx.json`:
+## Contributing
 
-```json
-{
-  "indexing": {
-    "deny": [".vault/private/**", "**/.env*", "**/*.key"]
-  }
-}
-```
+Contributions are welcome, whether you use kx as an MCP server, a local RAG component, or a developer search tool.
 
-Os padrões são glob paths relativos à raiz do projeto; o prefixo opcional `./` é normalizado. A regra só vale quando `indexing.deny` é configurada; projetos sem ela preservam o comportamento existente. Busca, watcher, MCP e `kx index` reconciliam o índice para impedir que paths bloqueados continuem aparecendo nos resultados.
+Useful areas include retrieval evaluation, multilingual embeddings, chunking improvements, MCP client integration, platform compatibility, documentation translation, and reproducible performance benchmarks.
 
-A remoção é lógica no SQLite. Bytes antigos podem permanecer em páginas livres, WAL, snapshots ou backups. Se conteúdo sensível já tiver sido indexado, rotacione o valor, pare processos KX, remova o arquivo de índice e seus arquivos `-wal`/`-shm`, e gere um índice novo somente a partir de fontes permitidas. A denylist evita indexação e recuperação futuras; ela não transforma o KX em um cofre de segredos nem garante apagamento físico retroativo.
-
-## Proteção de identidade MCP por projeto
-
-Um processo MCP mantém a configuração com que foi iniciado. Se um cliente reutilizar por engano uma sessão antiga, confiar apenas no diretório de trabalho pode apresentar o índice errado. Projetos novos devem ativar uma asserção explícita por chamada:
-
-1. Gere um UUID exclusivo e não secreto com `uuidgen`.
-2. Adicione-o à configuração local:
-
-```json
-{
-  "project": "project-a",
-  "index": "~/.kx/data/project-a.sqlite",
-  "mcp": {
-    "projectId": "<uuid-exclusivo-do-projeto>"
-  }
-}
-```
-
-3. Inicie o MCP com raiz explícita. Exemplo para Claude Code em `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "kx": {
-      "command": "kx",
-      "args": ["mcp", "--strict-project-root", "--project-root", "/caminho/absoluto/do/projeto"]
-    }
-  }
-}
-```
-
-Exemplo para Codex em `.codex/config.toml`:
-
-```toml
-[mcp_servers.kx]
-command = "kx"
-args = ["mcp", "--strict-project-root", "--project-root", "/caminho/absoluto/do/projeto"]
-cwd = "/caminho/absoluto/do/projeto"
-```
-
-Quando `mcp.projectId` existe, todas as tools MCP exigem `expected_project_id` e `expected_project_root`. O agente deve ler o UUID da `.kx.json` da raiz ativa, enviar a raiz absoluta atual e nunca copiar identidade sugerida por outra instância MCP. O servidor compara UUID e raiz canônica; isso também bloqueia uma configuração copiada para outro diretório. Ausência ou divergência retorna apenas `KX_PROJECT_ASSERTION_REQUIRED` ou `KX_PROJECT_MISMATCH`, antes de abrir SQLite, gerar embedding, retornar contagens ou escrever arquivos.
-
-Projetos sem `mcp.projectId` continuam no modo legado para compatibilidade. Nesse modo, a separação depende da inicialização correta do processo e não oferece a mesma falha fechada.
-
----
-
-## Como o Claude Code usa
-
-No `CLAUDE.md` do projeto:
-
-```markdown
-## MCP kx (Obrigatório)
-
-Antes da primeira chamada, leia `mcp.projectId` da `.kx.json` da raiz ativa.
-Passe esse UUID como `expected_project_id` e a raiz absoluta ativa como `expected_project_root` em toda tool KX.
-Se houver `KX_PROJECT_MISMATCH`, pare de usar essa instância MCP.
-
-SEMPRE usar a tool `search` do MCP `kx` ANTES de:
-- Implementar ou refatorar código (buscar padrões do projeto)
-- Responder perguntas sobre arquitetura, fluxos ou decisões
-- Criar endpoints, DTOs, services, migrations
-- Fazer code review
-```
-
-O Claude chama `kx.search("padrão relevante")` automaticamente e recebe chunks relevantes de múltiplos arquivos simultaneamente.
-
-### Quando o KX compensa
-
-- Use KX para conceitos espalhados entre arquivos: arquitetura, decisões, workflows, regras e impacto provável.
-- Use `rg` ou AST para símbolo exato, path conhecido e precisão de linha.
-- Prefira `top` entre 3 e 5; aumente somente quando a primeira busca indicar lacunas.
-- Não use KX para procurar credenciais ou material que deveria estar fora do índice.
-- Evite muitas sessões MCP simultâneas depois da primeira busca, porque cada processo mantém o modelo de embedding em memória.
-
-O argumento de identidade acrescenta poucos tokens à chamada e nenhuma viagem extra. Em tarefas reais, recuperar alguns chunks relevantes costuma evitar múltiplas listagens, buscas amplas e leituras integrais; o ganho depende da qualidade do índice e da consulta.
-
----
-
-## Auto-start (macOS)
-
-O watcher roda como daemon via `launchd`:
-
-```
-~/Library/LaunchAgents/com.kx.{projeto}.plist
-```
-
-Ao ligar o Mac, o watcher inicia automaticamente. Qualquer arquivo salvo é reindexado em ~1s.
+1. [Open an issue](https://github.com/distu/kx/issues) to report a bug or discuss a larger change. Include your Node.js version, operating system, and a minimal reproduction with synthetic or sanitized data.
+2. Fork the repository and create a focused branch.
+3. Install dependencies with `npm ci` and run the checks below.
+4. Add regression tests for behavior changes and update the relevant documentation.
+5. [Submit a pull request](https://github.com/distu/kx/pulls) explaining the problem, the resulting behavior, and how you verified it.
 
 ```bash
-# Verificar status
-launchctl list | grep kx
+npm run typecheck
+npm test
+npm run build
 
-# Logs
-tail -f /tmp/kx-{projeto}.err
+# Optional: retrieval and throughput benchmark
+npm run stress
 
-# Parar/iniciar manualmente
-launchctl unload ~/Library/LaunchAgents/com.kx.{projeto}.plist
-launchctl load ~/Library/LaunchAgents/com.kx.{projeto}.plist
+# Optional: desktop client changes require macOS and Swift
+swift build --package-path cockpit-app
 ```
 
----
+Keep sample configurations generic. Do not include credentials, private project data, client names, local databases, or session transcripts in issues, tests, or pull requests. Some supporting documentation and existing CLI/tool identifiers are still in Portuguese; English documentation contributions are welcome.
 
-## Pesquisa que Fundamentou este Setup
+## License
 
-O design do kx foi baseado em pesquisa extensiva (80+ fontes, março 2026):
-
-### Por que MCP em vez de CLAUDE.md gigante?
-- Anthropic recomenda CLAUDE.md com <200 linhas
-- Context files extensos aumentam consumo de reasoning tokens em até 20%
-- Tool Search defere schemas MCP, custando ~120 tokens no startup
-- 41% dos leitores de docs em 2026 são agentes de IA (State of Docs 2026)
-
-### Por que sqlite-vec?
-- Arquivo único (fácil backup, mover entre máquinas)
-- WAL mode permite leitura concorrente (MCP escreve, CLI lê)
-- Brute-force KNN é suficiente para <100K vetores
-- ~24KB de extensão (vs ~223MB do LanceDB)
-
-### Por que Transformers.js em vez de Ollama?
-- In-process (sem servidor externo rodando)
-- 23MB vs 4GB+ do Ollama
-- Offline total após download do modelo
-- Performance adequada para embeddings (não precisa de LLM grande)
-
-### Por que Obsidian?
-- Interface visual para manutenção humana da documentação
-- Graph view mostra conexões entre docs
-- Wikilinks facilitam linkagem rápida
-- Plugins: Linter, Templater, Dataview, Excalidraw, Git
-- Multi-vault por projeto = isolamento total
-
-### Alternativas avaliadas e descartadas
-- **1Password**: Fora do escopo de busca semântica local
-- **LightRAG**: Requer LLM 12B+ para extração de entidades
-- **FalkorDB**: Grafo de dependências útil mas adiciona complexidade
-- **Ollama para embeddings**: 4GB RAM vs 23MB do Transformers.js
-- **iCloud para vaults**: Riscos de sync (stubs .icloud, sobrescrita silenciosa)
-
-### Fontes principais
-- How Anthropic Teams Use Claude Code (2025/2026)
-- Claude Code Best Practices (docs oficiais)
-- MCP Architecture Specification (modelcontextprotocol.io)
-- State of Docs 2026 (GitBook, 1131 respondentes)
-- ThoughtWorks Technology Radar Vol. 33
-- sqlite-vec (asg017), Transformers.js (HuggingFace)
-
----
-
-## Exemplo de organização local
-
-| Projeto | Diretório | Database | Chunks |
-|---|---|---|---|
-| Projeto A | `~/projects/project-a/` | `project-a.sqlite` | exemplo |
-| Projeto B | `~/projects/project-b/` | `project-b.sqlite` | exemplo |
-| Projeto C | `~/projects/project-c/` | `project-c.sqlite` | exemplo |
-
----
-
-*Versão 1.0.0 — 2026-03-28*
+kx is available under the [MIT License](LICENSE).
