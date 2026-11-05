@@ -12,7 +12,7 @@ Use it with **Claude Code, Codex, Cursor, or another stdio MCP client**, or sear
 
 If you are building an AI coding workflow, a local retrieval-augmented generation (RAG) pipeline, or a searchable developer knowledge base, kx provides the retrieval layer. Your agent chooses when to call it and how to use the returned context.
 
-[Quick start](#quick-start) · [MCP setup](#connect-your-ai-agent) · [CLI](#cli-reference) · [Contributing](#contributing)
+[Quick start](#quick-start) · [MCP setup](#connect-your-ai-agent) · [CLI](#cli-reference) · [Contributing](#contributing) · [Contributors](#contributors)
 
 ## Why kx?
 
@@ -344,6 +344,27 @@ swift build --package-path cockpit-app
 ```
 
 Keep sample configurations generic. Do not include credentials, private project data, client names, local databases, or session transcripts in issues, tests, or pull requests. Some supporting documentation and existing CLI/tool identifiers are still in Portuguese; English documentation contributions are welcome.
+
+## Contributors
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/distu">
+        <img src="https://github.com/distu.png?size=100" width="100" alt="distu"><br>
+        <sub><b>Wilher Teixeira</b></sub>
+      </a><br>
+      <sub>Creator and maintainer</sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/iranblima">
+        <img src="https://github.com/iranblima.png?size=100" width="100" alt="iranblima"><br>
+        <sub><b>Iran Lima</b></sub>
+      </a><br>
+      <sub>Contributor</sub>
+    </td>
+  </tr>
+</table>
 
 ## License
 
